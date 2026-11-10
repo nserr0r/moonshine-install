@@ -2,7 +2,7 @@
 
 # 🌙 moonshine-install
 
-**Установщик RPM-системы из репозиториев: мастер, CLI и конфиг (файл, URL, git).**
+**Установщик evillin: размечает диск, шифрует, ставит пакеты из репозиториев и настраивает загрузку.**
 
 🌐 **Русский** · [English](README.en.md)
 
@@ -10,235 +10,257 @@
 
 ---
 
-**🚀 Суть:** система собирается `dnf --installroot` из ваших репозиториев прямо на новый диск. Машина описывается одним небольшим файлом.
+## 🌙 Что это
 
-> ⚠️ Установщик **стирает диски**. Сначала: `moonshine-install check ЦЕЛЬ --plan`.
+`moonshine-install` ставит систему на чистый диск. Работать с ним можно тремя способами:
+
+| Способ | Для чего | Команда |
+|---|---|---|
+| **Мастер** | первая установка: вопросы на экране, всё выбирается из списков | `moonshine-install` |
+| **Конфиг** | одинаковые установки и установка без присмотра: всё описано в одном файле | `moonshine-install --config moonshine.toml` |
+| **Флаги** | скрипты и быстрые проверки | `moonshine-install --disk /dev/sda …` |
+
+> ⚠️ Установщик **стирает выбранные диски целиком**. Перед установкой по конфигу запустите `moonshine-install check moonshine.toml --plan`: команда покажет, что будет сделано, и ничего не изменит.
 
 ---
 
-## ⚙️ Использование
+## 🧰 Что понадобится
 
-1. Мастер:
+1. Компьютер или виртуальная машина, загруженные с установочного носителя evillin. Подойдёт и любая работающая система с `dnf` и установленным пакетом `moonshine-install`.
+2. Права root.
+3. Доступ к репозиторию evillin: по сети или в локальном каталоге.
+4. Диск, данные на котором не нужны.
 
-```sh
-sudo moonshine-install
-```
+---
 
-2. Проверка конфига без изменений:
+## 🚀 Первая установка (мастер)
 
-```sh
-moonshine-install check https://evillin.online/moonshine.toml --plan
-```
-
-3. Установка по конфигу (файл, `https://`, `git+URL#ветка:путь.toml`):
+1. Загрузитесь с установочного носителя и войдите как `root`.
+2. Запустите мастер:
 
 ```sh
-sudo moonshine-install --config https://evillin.online/moonshine.toml
+moonshine-install
 ```
 
-4. Установка флагами:
+3. Пройдите восемь шагов. Слева список шагов, справа поля текущего шага:
+
+| Шаг | Что выбрать | Если сомневаетесь |
+|---|---|---|
+| 1. Шифрование | шифровать ли диск и как его открывать | оставьте «Да» и задайте парольную фразу: её спросят при каждой загрузке |
+| 2. Диск | схему, диск для системы, диск для загрузки | «Один диск», нужный диск из списка, «Тот же диск» |
+| 3. Репозитории | откуда брать пакеты и какие ставить | оставьте всё как есть |
+| 4. Система и пользователь | имя машины, пользователя, пароль, часовой пояс | укажите пользователя `root`, если `sudo` нет в списке пакетов |
+| 5. Сеть в initramfs | сеть до расшифровки диска | «нет», если не нужна разблокировка по SSH |
+| 6. Сеть в системе | сеть после загрузки | «DHCP» |
+| 7. Пакеты | итоговый список пакетов с зависимостями | просто посмотрите |
+| 8. Итог | сводка и подтверждение | прочитайте предупреждения ▲ |
+
+4. На шаге «Итог» введите `YES`: начнётся установка, на экране видно каждое действие.
+5. Когда появится «Готово», извлеките носитель и перезагрузитесь.
+
+Основные клавиши:
+
+| Клавиши | Действие |
+|---|---|
+| `↑` `↓` | поле или пункт списка |
+| `Enter` / `→` | изменить поле, открыть список, выбрать |
+| `←` / `Esc` | назад, отмена |
+| `Пробел` | переключить «Да/Нет», открыть список |
+| `Tab` / `Shift+Tab` | следующий / предыдущий шаг |
+| `e` / `F2` | править значение текстом |
+| `Ctrl+C` | выход без изменений |
+
+---
+
+## 📄 Установка по конфигу
+
+1. Возьмите пример [`dist/examples/moonshine.toml`](dist/examples/moonshine.toml) (после установки пакета он лежит в `/usr/share/doc/moonshine-install/`).
+2. Укажите диск, имя машины и репозиторий.
+3. Получите хеш пароля: команда спросит пароль и напечатает строку `$6$…`.
 
 ```sh
-sudo moonshine-install --disk /dev/sda --repo baseos --hostname moonshine \
-  --user alice:'$6$salt$...' --timezone Europe/Moscow
+openssl passwd -6
 ```
 
-Минимальный `moonshine.toml`:
+4. Вставьте хеш в `hash`:
 
 ```toml
 disk     = "/dev/sda"
 hostname = "moonshine"
-repo     = ["baseos"]
+
+[[repository]]
+id      = "evillin"
+baseurl = "https://repo.evillin.online/$basearch/"
+gpgkey  = "file:///etc/pki/rpm-gpg/RPM-GPG-KEY-evillin"
 
 [[users]]
-name = "alice"
-hash = "$6$salt$..."             # openssl passwd -6
+name = "root"
+hash = "$6$…"
 ```
 
-Перед стиранием установщик просит ввести `YES`; `--yes` отключает вопрос.
-
----
-
-## ✨ Возможности
-
-- 🖥️ **Мастер** (TUI), **CLI**, **TOML-конфиг**
-- 📦 **Репозитории**: хоста, локальные, из конфига; приоритеты как в yum
-- 💾 **Разметка**: разделы, **mdadm RAID**, **LVM2** (в том числе тонкие тома), ext4 / xfs / btrfs, swap
-- 🔐 **LUKS2** на любом устройстве: пароль или ключ-файл, отдельный заголовок, разблокировка по SSH
-- 🔌 **Загрузка на отдельном диске** (флешке)
-- 🌐 **Платформы**: BIOS+UEFI (гибрид), UEFI, BIOS, U-Boot
-- 🧩 **Параметры ядра** и **службы systemd**
-- 🛠️ **Сеть**: отдельно для initramfs и системы
-- 💿 **Модуль dracut**: установка с носителя или по сети
-- 🌍 **Языки**: English, Русский
-
-| Архитектура | Статус |
-|---|---|
-| x86_64 | поддерживается |
-| aarch64 | в тестировании |
-
----
-
-## 🔎 Железо
-
-Определяется при запуске, переопределяется `--arch`, `--cpu`, `--firmware`.
-
-| Что | Источник | Результат |
-|---|---|---|
-| Архитектура | бинарник | `x86_64` / `aarch64` |
-| Процессор | `/proc/cpuinfo` | Intel → `microcode_ctl` |
-| Прошивка | x86_64 → **hybrid**; aarch64 → UEFI при `/sys/firmware/efi`, иначе U-Boot | раскладка, загрузчик |
-
-| Платформа | `grub2-install --target` |
-|---|---|
-| hybrid | `i386-pc`, `i386-efi`, `x86_64-efi` |
-| uefi | `x86_64-efi` / `arm64-efi` |
-| bios | `i386-pc` |
-| uboot | `extlinux/extlinux.conf` |
-
-Команды запускаются в `chroot` с `--no-nvram --force --removable`, затем `grub2-mkconfig`.
-
----
-
-## 📦 Репозитории и пакеты
-
-| Источник | Флаг / ключ | Остаётся в системе |
-|---|---|---|
-| Репозиторий хоста | `--repo ID` | через `--repo-file` |
-| Локальный каталог | `--repo-dir PATH` | нет |
-| Репозиторий из конфига | `--repository …` / `[[repository]]` | да |
-
-```toml
-[[repository]]
-id       = "baseos"
-baseurl  = "https://mirror.evillin.online/9/BaseOS/$basearch/os/"
-priority = 10                   # 1…99, меньше = важнее
-gpgkey   = "file:///etc/pki/rpm-gpg/RPM-GPG-KEY-example"
-
-[[repository]]
-id       = "company"
-baseurl  = "https://rpm.evillin.online/company/$basearch/"
-priority = 5
-gpgcheck = false
-```
-
-| Ключ | Значение |
-|---|---|
-| `id` | обязателен, уникален |
-| `baseurl` / `metalink` / `mirrorlist` | ровно один |
-| `name`, `priority`, `exclude`, `includepkgs` | необязательны |
-| `gpgcheck` | по умолчанию включён |
-| `gpgkey` | обязателен при `gpgcheck` |
-
-- Приоритет репозитория хоста: `--repo-priority ID=N`, только на время установки.
-- Параметры dnf: `--option ключ=значение` (`releasever=44` → `--releasever=44`).
-- Пакеты: `--package ИМЯ` (имя, `@группа`, шаблон); `--bare` отключает встроенный набор.
-- Список пакетов с зависимостями показывается до установки.
-
-### Другой RPM-дистрибутив
-
-Нужны `dnf`, GRUB2 (`grub2-install`, `grub2-mkconfig`) и `dracut`. С `--bare` пакеты задаются полностью:
-
-```toml
-bare     = true
-firmware = "hybrid"
-disk     = "/dev/sda"
-hostname = "rocky"
-option   = ["releasever=9"]
-package  = ["@core", "kernel", "dracut", "grub2-tools", "grub2-pc-modules",
-            "grub2-efi-ia32-modules", "grub2-efi-x64-modules", "cryptsetup", "sudo"]
-
-[[repository]]
-id       = "baseos"
-baseurl  = "https://mirror.evillin.online/9/BaseOS/$basearch/os/"
-priority = 10
-gpgkey   = "file:///etc/pki/rpm-gpg/RPM-GPG-KEY-example"
-
-[[users]]
-name = "alice"
-hash = "$6$salt$..."
-```
-
----
-
-## 👤 Пользователи
+5. Проверьте конфиг. Диски при этом не трогаются:
 
 ```sh
-moonshine-install ... --user alice:'$6$salt$hash' --user bob
+moonshine-install check moonshine.toml --plan
 ```
 
-- Без `root` в списке он блокируется.
-- Остальные получают домашний каталог и группу **wheel**; ставится `sudo`.
-- Без хеша пароль спрашивается на консоли.
+6. Установите:
+
+```sh
+moonshine-install --config moonshine.toml
+```
+
+Перед стиранием установщик попросит ввести `YES`. Флаг `--yes` отключает вопрос: так делают при установке без присмотра.
+
+Конфиг можно хранить не только в файле:
+
+```sh
+moonshine-install --config https://evillin.online/moonshine.toml
+moonshine-install --config 'git+https://git.evillin.online/infra.git#main:machines/moonshine.toml'
+```
 
 ---
 
-## 🧩 Ядро и службы
+## 📖 Словарь
 
-| Что | Флаг | TOML | Мастер |
-|---|---|---|---|
-| Параметры ядра | `--kernel-arg` | `kernel_arg = ["quiet"]` | «Параметры ядра» |
-| Службы | `--service` | `service = ["sshd"]` | «Службы для включения» |
-
-- Параметры дописываются в `GRUB_CMDLINE_LINUX` (`/etc/default/grub`) и пишутся в `/etc/kernel/cmdline`.
-- Допустимы печатные ASCII без пробелов, кавычек, `$`, `` ` `` и `\`.
-- Службы включаются `systemctl enable` в `chroot`; пакет службы добавьте в `--package`.
-
----
-
-## 🛠️ Сеть
-
-Настраивается отдельно для initramfs (`--initrd-*`, `[initrd]`) и системы (`--system-*`, `[system]`).
-
-| Режим | Значение |
+| Слово | Что значит |
 |---|---|
-| `none` | без сети |
-| `dhcp` | DHCP, `interface` необязателен |
-| `manual` | обязательны `interface`, `address`, `gateway`; `dns` повторяется |
+| **Репозиторий** | сервер или каталог с пакетами `.rpm`; система собирается из них командой `dnf` |
+| **Хеш пароля** | зашифрованная запись пароля (`$6$…`); сам пароль в конфиге не хранится |
+| **LUKS** | шифрование диска; без парольной фразы или ключа данные не прочитать |
+| **Заголовок LUKS** | служебная часть зашифрованного диска; его можно держать отдельно, например на флешке |
+| **initramfs** | маленькая система, которая грузится первой: открывает диски и передаёт управление основной |
+| **dracut** | программа, которая собирает initramfs |
+| **/boot** | раздел с ядром и загрузчиком; не шифруется; здесь он же ESP для UEFI |
+| **BIOS / UEFI** | способы загрузки компьютера; на x86_64 ставятся оба сразу (hybrid) |
+| **U-Boot** | загрузчик плат ARM |
+| **LVM** | тома, которые можно делить и расширять поверх одного или нескольких дисков |
+| **RAID** | несколько дисков как один: зеркало (RAID1) или с чередованием |
+| **wheel / sudo** | группа администраторов и программа, которая даёт им права root |
 
-- Службу системы задаёт `--system-backend networkd|networkmanager`.
-- Вторая служба маскируется (`systemctl mask`), выбранная включается: при `networkmanager` — маска `systemd-networkd`, при `networkd` — маска `NetworkManager`. Отсутствие юнита не ошибка.
-- `--ssh-key` ставит dracut-sshd и требует сети в initramfs.
+---
+
+## 📦 Пакеты
+
+**Основной набор** ставится всегда. В мастере это поле «Пакеты» на шаге «Репозитории», в конфиге — `base`:
+
+```text
+bash coreutils dnf dracut evillin-fonts-console evillin-release kbd kernel lvm2 openssh-server rpm shadow-utils systemd util-linux
+```
+
+**По условию** установщик сам добавляет то, без чего система не загрузится:
+
+| Условие | Пакеты |
+|---|---|
+| GRUB (BIOS/UEFI) | `grub-tools`, `grub-*-modules` по платформам |
+| U-Boot | `uboot-tools` |
+| Раздел `/boot` | `dosfstools` |
+| Шифрование | `cryptsetup`, `lvm2` |
+| LVM / тонкие тома | `lvm2` / `device-mapper-persistent-data` |
+| RAID | `mdadm` |
+| ext4 / xfs / btrfs | `e2fsprogs` / `xfsprogs` / `btrfs-progs` |
+| Сеть в initramfs | `dracut-network` |
+| SSH-ключи для разблокировки | `dracut-sshd`, `openssh-server` |
+| Сеть через NetworkManager | `NetworkManager` |
+| Сеть через systemd-networkd | `systemd-networkd`, `systemd-resolved` при DNS, заданных вручную |
+
+Пакет, который уже есть в списке, повторно не добавляется.
+
+| Что | Флаг / ключ |
+|---|---|
+| Заменить основной набор | `--base ИМЯ` / `base = […]` |
+| Добавить пакеты | `--package ИМЯ` / `package = […]`: имя, `@группа` или шаблон |
+| Только свои пакеты, без основного и условных | `--bare` / `bare = true` |
+| Имя GRUB (`ИМЯ-tools`, `ИМЯ-install`, `/boot/ИМЯ`) | `--grub ИМЯ` / `grub`, по умолчанию `grub` |
+
+---
+
+## 👤 Пользователи и права
+
+```toml
+[[users]]
+name = "root"
+hash = "$6$…"
+
+[[users]]
+name = "alice"
+hash = "$6$…"
+```
+
+1. `root` в списке получает пароль. Если `root` в списке нет, он **блокируется**.
+2. Остальные пользователи получают домашний каталог и группу `wheel`.
+3. Права root пользователь из `wheel` получает только через `sudo`, а `sudo` в основной набор не входит. Добавьте `sudo` в пакеты или укажите пользователя `root`. Если не сделать ни того, ни другого, права root не получит никто: `check` и шаг «Итог» об этом предупредят.
+4. Если хеш не указан, пароль спросят на консоли.
+
+---
+
+## 🔐 Шифрование
+
+Шифруется любое устройство: раздел, массив RAID, физический или логический том LVM.
+
+| Способ | Ключ | Что при загрузке |
+|---|---|---|
+| Парольная фраза | `crypt=pass` | фразу вводят на консоли или по SSH |
+| Ключ-файл | `crypt=key` | ключ лежит в initramfs на диске загрузки, ничего вводить не нужно |
+| Отдельный заголовок | `header=detached` | заголовок лежит в `/etc/luks` и в initramfs |
+
+- Для простой схемы хватит флагов: `--no-encryption` (не шифровать), `--keyfile` (ключ-файл), `--detached-header` (отдельный заголовок).
+- Парольная фраза одна на все устройства с `crypt=pass`.
+- `/boot` и `biosboot` не шифруются.
+- При загрузке initramfs открывает только корень и `/usr`, остальное открывает система по `/etc/crypttab`.
+- Ключ-файл для корня требует отдельного заголовка.
+
+**Разблокировка по SSH.** `--ssh-key "ssh-ed25519 …"` ставит `dracut-sshd`: после включения машины подключаетесь по SSH и вводите фразу. Нужна сеть в initramfs (`[initrd]`).
+
+**Загрузка с флешки.** Укажите `--boot-disk` или «Диск для ядра и загрузчика» в мастере. На флешку попадут ядро, загрузчик, initramfs с ключами и заголовками. Системный диск останется без таблицы разделов: без флешки система не загрузится.
+
+> ⚠️ Если потерять флешку с ключом и заголовком, данные не восстановить. Храните копию заголовков отдельно.
 
 ---
 
 ## 💾 Диски и разметка
 
-Диск задаётся путём: `/dev/sda`, `/dev/nvme0n1` или `/dev/disk/by-id/…` (предпочтительно).
+Диск задаётся путём: `/dev/sda`, `/dev/nvme0n1`. Надёжнее путь из `/dev/disk/by-id/…`: он не меняется после перезагрузки.
 
-| Схема | Раскладка |
+**Готовые схемы:**
+
+| Схема | Что получится |
 |---|---|
-| `--disk` | biosboot (BIOS, hybrid) + `/boot` FAT32 + корень |
-| `--disk` + `--boot-disk` | загрузка на втором диске, система целиком без таблицы разделов |
-| U-Boot | `/boot` первым разделом с отступом 16 MiB |
+| Один диск | `biosboot` 4 MiB (для BIOS) + `/boot` 512 MiB + корень |
+| Отдельный диск загрузки | `/boot` на втором диске, система на первом целиком |
+| LVM, RAID + LVM | в мастере, из нескольких дисков |
+| U-Boot | `/boot` первым разделом с отступом 16 MiB под загрузчик платы |
 
-- `/boot` — FAT32, он же ESP. По умолчанию 512 MiB (`--boot-size`, минимум 256).
-- В мастере также «LVM» и «RAID + LVM» из нескольких дисков.
+`/boot` — раздел FAT32, он же ESP. Размер: `--boot-size` (от 256, по умолчанию 512 MiB).
 
 ### Своя разметка
 
+В мастере: шаг «Диск» → «Схема дисков» → «Своя разметка» → «Открыть редактор». Во флагах и в конфиге — три вида строк:
+
 ```text
---partition disk=ДИСК,size=РАЗМЕР,point=ТОЧКА[,fs=ext4|xfs|btrfs][,mkfs=…][,options=…][,crypt=pass|key[,header=detached]]
---raid      name=ИМЯ,level=0|1|5|6|10,point=ТОЧКА[,fs=…][,mkfs=…][,options=…][,crypt=…]
---volume    vg=ГРУППА,name=ИМЯ,size=РАЗМЕР,point=ТОЧКА[,pool=ПУЛ][,fs=…][,mkfs=…][,options=…][,crypt=…]
+--partition disk=ДИСК,size=РАЗМЕР,point=НАЗНАЧЕНИЕ[,fs=ext4|xfs|btrfs][,mkfs=…][,options=…][,crypt=pass|key[,header=detached]]
+--raid      name=ИМЯ,level=0|1|5|6|10,point=НАЗНАЧЕНИЕ[,fs=…][,mkfs=…][,options=…][,crypt=…]
+--volume    vg=ГРУППА,name=ИМЯ,size=РАЗМЕР,point=НАЗНАЧЕНИЕ[,pool=ПУЛ][,fs=…][,mkfs=…][,options=…][,crypt=…]
 ```
 
 | `size` | Значение |
 |---|---|
 | `512MiB`, `40GiB` | точный размер |
-| `rest` | остаток |
+| `rest` | всё оставшееся место |
 | `whole` | диск целиком, без таблицы разделов |
 
 | `point` | Значение |
 |---|---|
-| `biosboot` | 4 MiB для GRUB (BIOS, hybrid) |
-| `reserve` | пустой раздел размером с `biosboot` и `/boot` |
+| `/`, `/home`, `/var`, … | файловая система в этой точке |
 | `boot` | `/boot`, FAT32, всегда обычный раздел |
+| `biosboot` | 4 MiB для GRUB при загрузке через BIOS |
 | `swap` | подкачка |
-| `pool` | пул тонких томов (`--volume`) |
-| `lvm:ГРУППА` | физический том |
+| `lvm:ГРУППА` | физический том для группы LVM |
 | `raid:ИМЯ` | участник массива |
-| `/`, `/home`, … | файловая система |
+| `pool` | пул тонких томов LVM |
+| `reserve` | пустой раздел размером с загрузочные, чтобы диски RAID были одинаковыми |
+
+Пример: LVM на одном диске, `/home` на xfs.
 
 ```text
 --partition disk=/dev/sda,size=4MiB,point=biosboot
@@ -248,7 +270,7 @@ moonshine-install ... --user alice:'$6$salt$hash' --user bob
 --volume vg=vg,name=home,size=rest,point=/home,fs=xfs
 ```
 
-RAID1 под LVM, загрузка с флешки:
+Пример: зеркало из двух дисков под LVM, загрузка с флешки.
 
 ```toml
 firmware = "uefi"
@@ -281,273 +303,245 @@ point = "/"
 
 [[volume]]
 vg    = "vg"
-name  = "swap"
-size  = "8GiB"
-point = "swap"
-
-[[volume]]
-vg      = "vg"
-name    = "home"
-size    = "rest"
-point   = "/home"
-fs      = "xfs"
-options = "noatime"
+name  = "home"
+size  = "rest"
+point = "/home"
 ```
 
-### Тонкие тома LVM
+**Тонкие тома.** Это тома, место под которые выделяется по мере записи. Пул — том с `point=pool`, тонкий том указывает его в `pool=`. Размер тонкого тома задаётся числом, `rest` нельзя. Пул не шифруется, `swap` тонким не бывает. Если тонкие тома в сумме больше пула, `check` предупредит.
 
-Пул — том с `point=pool`; тонкие тома указывают его в `pool=`. Размер тонкого тома виртуальный (`rest` не допускается).
-
-```text
---partition disk=/dev/sda,size=4MiB,point=biosboot
---partition disk=/dev/sda,size=512MiB,point=boot
---partition disk=/dev/sda,size=rest,point=lvm:vg
---volume vg=vg,name=pool,size=100GiB,point=pool
---volume vg=vg,name=root,size=50GiB,point=/,pool=pool
---volume vg=vg,name=home,size=200GiB,point=/home,pool=pool
-```
-
-- Пул не шифруется, `swap` не бывает тонким.
-- Превышение объёма пула даёт замечание в `check`.
-
-### Параметры файловой системы
-
-| Ключ | Значение |
-|---|---|
-| `mkfs=АРГУМЕНТЫ` | аргументы `mkfs.*` через пробел |
-| `options=ПАРАМЕТРЫ` | поле `fstab` (по умолчанию `defaults`) |
-
-Запятая в значениях пишется как `;`. Запрещены `-U`, `-F`, `-f`, `--uuid`, `--force`.
+**Параметры файловой системы.** `mkfs=` — аргументы `mkfs.*`, `options=` — параметры монтирования в `fstab` (по умолчанию `defaults`). Запятая внутри значения пишется как `;`. Запрещены `-U`, `-F`, `-f`, `--uuid`, `--force`.
 
 ```text
---partition disk=/dev/sdb,size=whole,point=/data,mkfs=-T largefile4 -m 1,options=noatime
 --partition disk=/dev/sdb,size=whole,point=/data,fs=xfs,mkfs=-m crc=1;finobt=1,options=noatime;discard
 ```
 
-### Проверка разметки
-
-До стирания проверяется:
-
-- один `/` и один `boot`; `biosboot` только для BIOS и hybrid
-- число участников RAID, разные диски
-- тома в группе, не более одного `rest`
-- безопасные и уникальные точки монтирования
-- размеры по реальным дискам (только при установке)
+**Что проверяется до стирания:** один `/` и один `boot`; `biosboot` только при BIOS; участники RAID на разных дисках; не больше одного `rest`; точки монтирования без повторов; при установке — размеры по реальным дискам.
 
 ### Редактор разметки
-
-Страница «Диск» → «Схема дисков» → «Своя разметка».
 
 | Клавиши | Действие |
 |---|---|
 | `↑` `↓` `Home` `End` `PgUp` `PgDn` | перемещение |
-| `→` / `←` | развернуть / свернуть |
+| `→` / `←` | развернуть / свернуть ветку |
+| `NUM+` / `NUM-` | развернуть / свернуть всё |
 | `n` | добавить по месту |
-| `r` / `v` | RAID / том LVM |
-| `e` (`F2`) | править |
-| `f` | файловая система |
+| `r` / `v` | массив RAID / том LVM |
+| `e` (`F2`) | править строкой |
+| `f` | сменить файловую систему |
 | `o` | параметры: по умолчанию → SSD → большие файлы |
 | `c` / `h` | шифрование / отдельный заголовок |
 | `d` (`Delete`) | удалить |
 | `Tab` | подставить `point=` |
-| `u` | отменить (до 32 шагов) |
+| `u` | отменить, до 32 шагов |
 | `Esc` (`q`) | закрыть |
 
-### Утилиты установщика
+Ошибки разметки подсвечиваются красным прямо в дереве.
 
-Недостающие утилиты ставятся хостовым `dnf` до любых изменений дисков.
+### Утилиты самого установщика
 
-| Утилита | Пакет | Когда |
-|---|---|---|
-| `mkfs.fat` | `dosfstools` | всегда |
-| `mkfs.ext4` | `e2fsprogs` | ext4 |
-| `mkfs.xfs` | `xfsprogs` | xfs |
-| `mkfs.btrfs` | `btrfs-progs` | btrfs |
-| `thin_check` | `device-mapper-persistent-data` | тонкие тома |
-| `cryptsetup` | `cryptsetup` | шифрование |
-| `pvcreate` | `lvm2` | LVM |
-| `mdadm` | `mdadm` | RAID |
+Если на носителе нет нужной утилиты, установщик сам поставит её через `dnf` до того, как тронет диски: `mkfs.fat` (`dosfstools`), `mkfs.ext4` (`e2fsprogs`), `mkfs.xfs` (`xfsprogs`), `mkfs.btrfs` (`btrfs-progs`), `cryptsetup`, `pvcreate` (`lvm2`), `mdadm`, `thin_check` (`device-mapper-persistent-data`).
 
 ---
 
-## 🔐 Шифрование
+## 🌐 Сеть
 
-LUKS2 на разделе, массиве, физическом или логическом томе; слои комбинируются.
+Сеть настраивается отдельно в двух местах:
 
-| Ключ | Значение |
+| Где | Зачем | Флаги / раздел конфига |
+|---|---|---|
+| initramfs | разблокировка по SSH, конфиг по сети | `--initrd-*` / `[initrd]` |
+| система | обычная работа | `--system-*` / `[system]` |
+
+| Режим | Что указать |
 |---|---|
-| `crypt=pass` | парольная фраза, одна на все устройства |
-| `crypt=key` | случайный ключ `/etc/luks/ИМЯ.key` (600) |
-| `header=detached` | заголовок `/etc/luks/ИМЯ.hdr` |
+| `none` | ничего, сети нет |
+| `dhcp` | ничего; `interface` по желанию |
+| `manual` | `interface`, `address` (`10.0.0.5/24`), `gateway`, `dns` (можно несколько) |
 
-- Простые схемы шифруют корень: `--no-encryption`, `--keyfile`, `--detached-header`.
-- В initramfs попадают только устройства, нужные для `/` и `/usr`; остальные открывает система по `crypttab`.
-- `/boot` и biosboot не шифруются.
-- Для устройства в initramfs `crypt=key` требует `header=detached`.
-- Заголовок внутри устройства занимает до 16 MiB.
-- Отдельный заголовок на разделе в `crypttab` задаётся через `PARTUUID=`.
-
-```text
---partition disk=/dev/sda,size=4MiB,point=biosboot
---partition disk=/dev/sda,size=512MiB,point=boot
---partition disk=/dev/sda,size=rest,point=/,crypt=key,header=detached
---partition disk=/dev/sdb,size=whole,point=/mnt/data,crypt=key,header=detached
+```toml
+[system]
+network   = "manual"
+interface = "enp3s0"
+address   = "10.0.0.5/24"
+gateway   = "10.0.0.1"
+dns       = ["9.9.9.9"]
+backend   = "networkd"
 ```
 
-### Удалённая разблокировка
-
-`--ssh-key` включает dracut-sshd; парольная фраза вводится по SSH.
-
-> ⚠️ Ключ и заголовок корня в initramfs не защищают от потери флешки с `/boot`. Храните копию заголовков отдельно.
+`backend` — служба сети: `networkd` (по умолчанию) или `networkmanager`. Вторая служба отключается (`systemctl mask`), даже если её нет в системе.
 
 ---
 
-## 📄 Конфиг
+## 🧩 Ядро и службы
 
-TOML повторяет флаги CLI:
+| Что | Флаг | Конфиг | Мастер |
+|---|---|---|---|
+| Параметры ядра | `--kernel-arg quiet` | `kernel_arg = ["quiet"]` | «Параметры ядра» |
+| Службы | `--service sshd` | `service = ["sshd"]` | «Службы для включения» |
 
-1. `a_b` → `--a-b`.
-2. Массив повторяет флаг.
-3. `true` ставит флаг, `false` ничего не делает.
-4. `[initrd]`, `[system]`, `[uboot]` добавляют префикс.
-5. `[[users]]`, `[[partition]]`, `[[raid]]`, `[[volume]]`, `[[repository]]` — блоки.
+- Параметры ядра сохраняются в `/etc/default/grub` и `/etc/kernel/cmdline`: новые ядра получат их сами.
+- Службы включаются `systemctl enable`. Если пакета службы нет в основном наборе, добавьте его в пакеты.
+
+---
+
+## 📚 Репозитории
+
+| Откуда | Флаг / ключ | Попадёт в систему |
+|---|---|---|
+| Репозиторий носителя (`/etc/yum.repos.d`) | `--repo ID` | если указать `--repo-file` или «Перенести репозитории в систему» в мастере |
+| Локальный каталог с `.rpm` и метаданными | `--repo-dir ПУТЬ` | нет |
+| Описанный в конфиге | `[[repository]]` / `--repository …` | да |
+
+```toml
+[[repository]]
+id       = "evillin"                                      # обязателен, уникален
+baseurl  = "https://repo.evillin.online/$basearch/"       # или metalink, или mirrorlist
+gpgkey   = "file:///etc/pki/rpm-gpg/RPM-GPG-KEY-evillin"  # нужен, пока gpgcheck включён
+priority = 10                                             # 1…99, меньше — важнее
+```
+
+Ещё ключи: `name`, `exclude`, `includepkgs`, `gpgcheck = false`.
+
+- Приоритет репозитория носителя на время установки: `--repo-priority ID=N`.
+- Параметры `dnf`: `--option ключ=значение`, например `tsflags=nodocs`. По умолчанию параметров нет.
+
+---
+
+## 🗂️ Конфиг подробно
+
+Конфиг — файл TOML. Его ключи повторяют флаги:
+
+1. `boot_disk = "…"` — то же, что `--boot-disk …`.
+2. Массив повторяет флаг: `kernel_arg = ["quiet", "splash"]`.
+3. `true` ставит флаг (`keyfile = true`), `false` ничего не делает.
+4. Разделы `[initrd]`, `[system]`, `[uboot]` добавляют приставку: `[system] network = "dhcp"` — это `--system-network dhcp`.
+5. Блоки `[[users]]`, `[[partition]]`, `[[raid]]`, `[[volume]]`, `[[repository]]` можно повторять.
+
+Флаги в командной строке после `--config` важнее конфига.
 
 ```toml
 disk      = "/dev/disk/by-id/nvme-Samsung_SSD_980_PRO"
 boot_disk = "/dev/disk/by-id/usb-SanDisk_Cruzer-0:0"
 hostname  = "moonshine"
 timezone  = "Europe/Moscow"
-
-repo          = ["updates"]
-repo_priority = ["updates=20"]
-repo_dir      = ["/srv/rpms"]
-package       = ["vim-enhanced", "htop"]
-option        = ["tsflags=nodocs", "weak_deps=False", "releasever=44"]
-
-keyfile = true
-ssh_key = ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGq3Zr0C6c3C3m1x0hJ6iHqB0t9pQ0QJ5h2S3mT1mYxQ alice@evillin.online"]
+keyfile   = true
+ssh_key   = ["ssh-ed25519 AAAA… alice@evillin.online"]
+package   = ["sudo"]
 
 [[repository]]
-id       = "company"
-baseurl  = "https://rpm.evillin.online/company/$basearch/"
-priority = 5
-gpgcheck = false
+id      = "evillin"
+baseurl = "https://repo.evillin.online/$basearch/"
+gpgkey  = "file:///etc/pki/rpm-gpg/RPM-GPG-KEY-evillin"
 
 [[users]]
 name = "alice"
-hash = "$6$salt$..."
+hash = "$6$…"
 
 [initrd]
 network = "dhcp"
 
 [system]
-network   = "manual"
-address   = "10.0.0.5/24"
-gateway   = "10.0.0.1"
-dns       = ["9.9.9.9"]
-interface = "enp3s0"
-backend   = "networkd"
+network = "dhcp"
 ```
 
-```sh
-moonshine-install --config /root/moonshine.toml
-moonshine-install --config https://evillin.online/moonshine.toml
-moonshine-install --config 'git+https://git.evillin.online/infra.git#main:machines/moonshine.toml'
-```
-
-- Git: `git+URL#[ветка|тег|коммит:]путь.toml`, путь относительный, без `..`.
-- Аргументы после файла важнее конфига.
-- Пример: [`dist/examples/moonshine.toml`](dist/examples/moonshine.toml).
+Конфиг из git: `git+URL#[ветка|тег|коммит:]путь.toml`, путь внутри репозитория, без `..`.
 
 ---
 
-## ✅ Проверка (check)
+## ✅ Проверка: check
 
-`check` проверяет конфиг целиком, **не меняя и не читая диски**. Код `0` — верно, `1` — ошибка.
+`check` проверяет конфиг целиком и показывает, что получится. **Диски не меняются и не читаются.** Код возврата `0` — всё верно, `1` — есть ошибка.
 
 ```sh
-moonshine-install check moonshine.toml
-moonshine-install check moonshine.toml --plan
+moonshine-install check moonshine.toml          # сводка
+moonshine-install check moonshine.toml --plan   # сводка и все команды по порядку
 ```
 
 ```text
 Конфигурация корректна.
 
-Платформа:      UEFI · x86_64 · Intel
+Платформа:      BIOS+UEFI · x86_64
 Имя машины:     moonshine
 Часовой пояс:   Europe/Moscow
-Пользователи:   alice
+Пользователи:   root, alice
 Параметры ядра: нет
 Службы:         нет
 
 Разметка (диски и их размеры при проверке не читаются):
-  /dev/sda1              512MiB  boot
-  /dev/sda2                rest  /  [LUKS: ключ-файл, заголовок отдельно]
+  /dev/sda1                4MiB  biosboot
+  /dev/sda2              512MiB  boot
+  /dev/sda3                rest  /  [LUKS: ключ-файл, заголовок отдельно]
 
 Источники пакетов:
-  репозиторий хоста updates (приоритет 20)
-  репозиторий из конфига company (приоритет 5)
-  пакеты: встроенный набор + указанные пакеты, указано 2
+  репозиторий из конфига evillin
+  основной набор: bash coreutils dnf dracut evillin-fonts-console evillin-release kbd kernel lvm2 openssh-server rpm shadow-utils systemd util-linux
+  дополнительно: нет
+  GRUB: grub
 Сеть в initramfs: нет
-Сеть в системе:   нет
-
-Замечания:
-  ! root не указан: он будет заблокирован, входить нужно пользователем из wheel
-  ! сеть в установленной системе не настроена
+Сеть в системе:   dhcp
 ```
 
-Замечания не меняют код возврата.
+Если что-то стоит знать заранее, в конце появится блок «Замечания». Замечания не мешают установке.
 
 ---
 
-## 🔑 Секреты
+## 🔑 Пароли и ключи
 
 | Что | Как передать |
 |---|---|
-| Пароль пользователя | хеш: `--user alice:'$6$…'` или `hash` |
-| Парольная фраза дисков | файл (600): `--passphrase-file` / `passphrase_file`, иначе ввод |
-| Ключ диска | создаётся сам (`crypt=key`) |
-| Ключи SSH | `--ssh-key` |
+| Пароль пользователя | хеш `openssl passwd -6`: `hash` в конфиге или `--user alice:'$6$…'` |
+| Парольная фраза дисков | файл с правами 600: `--passphrase-file` / `passphrase_file`; без файла её спросят на консоли |
+| Ключ диска | создаётся сам при `crypt=key` |
+| SSH-ключ для разблокировки | `--ssh-key` / `ssh_key` |
 | Доступ к конфигу по `https` | `~/.netrc` |
-| Доступ к git | ключ SSH или менеджер учётных данных |
+| Доступ к git | SSH-ключ или менеджер учётных данных git |
 
-- Хеш: `openssl passwd -6`.
-- Парольная фраза хешем быть не может: LUKS выводит ключ из самой фразы.
-- Файл с правами для группы или остальных, пустой или многострочный — установка не начнётся.
-- Пароль в URL не писать.
+- Парольную фразу нельзя задать хешем: из самой фразы получается ключ шифрования.
+- Файл парольной фразы, открытый группе или остальным, пустой или из нескольких строк, не принимается.
+- Не пишите пароль в URL.
+
+> ⚠️ Конфиг по сети содержит хеши паролей: отдавайте его по `https`.
 
 ---
 
-## 💿 Установка с носителя (dracut)
+## 💿 Установка с носителя и по сети
 
-`dist/` превращает установщик в загрузочный образ: флешка, PXE/iPXE, пункт GRUB.
+Установщик можно встроить в initramfs: он запустится сразу после загрузки, с флешки, по сети (PXE/iPXE) или из пункта меню GRUB.
+
+1. Соберите и установите файлы:
 
 ```sh
 cargo build --release --locked
-sudo make -C dist install
-sudo /usr/libexec/moonshine-install/build-initrd moonshine-installer.img
+make -C dist install
 ```
 
-`make install` понимает `DESTDIR` и `PREFIX`. Модуль подключается только по запросу (`dracut --add moonshine-install`).
+2. Соберите образ initramfs с установщиком:
 
-| Параметр ядра | Значение |
+```sh
+/usr/libexec/moonshine-install/build-initrd moonshine-installer.img
+```
+
+3. Загрузите ядро с этим образом и параметрами:
+
+| Параметр ядра | Что делает |
 |---|---|
-| `moonshine.config=ГДЕ` | файл, `https://…`, `git+URL#[ветка:]путь.toml` |
+| `moonshine.config=ГДЕ` | установка по конфигу: файл, `https://…` или `git+…` |
 | `moonshine.wizard=1` | мастер на консоли |
 | `moonshine.yes=1` | без вопроса `YES` |
-| `moonshine.check=1` | только проверка |
-| `moonshine.after=reboot\|poweroff\|shell\|none` | действие после успеха (`reboot`) |
+| `moonshine.check=1` | только проверка конфига |
+| `moonshine.after=reboot\|poweroff\|shell\|none` | что сделать после успеха, по умолчанию `reboot` |
 | `moonshine.lang=en\|ru` | язык |
 
-- Конфиг по сети требует `ip=dhcp`; без `ip=` и `rd.neednet` модуль добавляет `rd.neednet=1 ip=dhcp`.
-- Файл парольной фразы кладётся в образ: `build-initrd inst.img "$(uname -r)" --include /root/luks.txt /root/luks.txt`.
+- Для конфига по сети нужна сеть: без `ip=` модуль сам добавит `rd.neednet=1 ip=dhcp`.
+- Файл парольной фразы кладётся в образ так: `build-initrd inst.img "$(uname -r)" --include /root/luks.txt /root/luks.txt`.
 - При ошибке остаётся аварийная консоль dracut.
 
-**GRUB:**
+**Пункт меню GRUB на уже работающей машине.** Удобно, чтобы переустановить удалённый сервер: после перезагрузки выбираете пункт, и машина ставится по конфигу. `moonshine.yes=1` нужен, когда у консоли никого нет: диск сотрётся без вопроса.
 
 ```sh
 /usr/libexec/moonshine-install/grub-entry /vmlinuz /moonshine-installer.img \
-    https://evillin.online/moonshine.toml moonshine.yes=1 >> /boot/grub2/custom.cfg
+    https://evillin.online/moonshine.toml moonshine.yes=1 >> /boot/grub/custom.cfg
 ```
 
 **iPXE:**
@@ -559,145 +553,94 @@ initrd http://evillin.online/moonshine-installer.img
 boot
 ```
 
-**Живая система:**
+**Живая система.** Служба запускает установщик по тем же параметрам ядра:
 
 ```sh
-sudo systemctl enable moonshine-install.service
+systemctl enable moonshine-install.service
 ```
 
-> ⚠️ Конфиг по сети содержит хеши паролей: отдавайте по `https`. Для `crypt=pass` без присмотра используйте `passphrase_file`, `crypt=key` или не шифруйте.
-
-Проверка скриптов: `make -C dist check`.
-
----
-
-## 🧭 Управление в мастере
-
-Страницы: **Шифрование → Диск → Репозитории → Система → Сеть в initramfs → Сеть в системе → Пакеты → Итог**.
-
-| Клавиши | Действие |
-|---|---|
-| `Tab` / `PageDown` | следующая страница |
-| `Shift+Tab` / `PageUp` | предыдущая страница |
-| `↑` `↓` | страница, поле, пункт списка |
-| `Enter` / `→` | войти, изменить, выбрать |
-| `←` / `Esc` | назад, отмена |
-| `Пробел` | переключить / открыть список |
-| `e` / `F2` | править текстом |
-| `Backspace` / `Delete` | убрать последнее значение |
-| `Home` / `End` | первое / последнее поле |
-| `Ctrl+C` | выход |
-
-Экран установки показывает план: ✓ выполнено, ✗ сбой, ▸ идёт, · ожидает.
+`make -C dist install` понимает `DESTDIR` и `PREFIX`. Проверка скриптов: `make -C dist check`.
 
 ---
 
 ## 🌍 Язык
 
-| Порядок | Способ |
-|---|---|
-| 1 | `--lang en\|ru` |
-| 2 | `lang` в конфиге |
-| 3 | `MOONSHINE_LANG` |
-| 4 | `moonshine.lang=en\|ru` |
-| 5 | `LC_ALL`, `LC_MESSAGES`, `LANG`: `ru…` → русский, иначе английский |
-
-Ключи конфига, флаги и команды плана не переводятся. В initramfs по умолчанию английский.
+Русский выбирается сам, если язык системы русский (`LANG=ru_RU.UTF-8`). Иначе — английский. Явно: `--lang ru`, `lang = "ru"` в конфиге, переменная `MOONSHINE_LANG=ru` или параметр ядра `moonshine.lang=ru`.
 
 ---
 
-## 📚 Флаги
+## 📋 Все флаги
 
 ```text
 moonshine-install                              мастер
 moonshine-install ФЛАГИ                        установка
 moonshine-install check ЦЕЛЬ [--plan] [ФЛАГИ]  проверка
 
---disk ПУТЬ                   диск с корнем
---boot-disk ПУТЬ              диск загрузки (по умолчанию тот же)
---boot-size MIB               размер /boot (от 256), по умолчанию 512
---partition …  --raid …  --volume …   своя разметка
---firmware hybrid|uefi|bios|uboot
---arch x86_64|aarch64
---cpu intel|amd|other
---uboot-image ФАЙЛ            сырой образ U-Boot
---uboot-offset СЕКТОРЫ        смещение образа, меньше 32768
+Диски
+  --disk ПУТЬ                   диск с системой
+  --boot-disk ПУТЬ              диск загрузки (по умолчанию тот же)
+  --boot-size MIB               размер /boot, от 256 (по умолчанию 512)
+  --partition …  --raid …  --volume …   своя разметка
+  --firmware hybrid|uefi|bios|uboot
+  --arch x86_64|aarch64
+  --uboot-image ФАЙЛ            образ U-Boot для платы
+  --uboot-offset СЕКТОРЫ        смещение образа, меньше 32768
 
---repo ID                     репозиторий хоста (повторяется)
---repo-priority ID=N          приоритет 1…99, на время установки
---repository id=…,baseurl|metalink|mirrorlist=…[,name=…][,priority=…][,gpgcheck=0|1][,gpgkey=…]
---repo-dir КАТАЛОГ            локальный каталог с rpm (повторяется)
---repo-file ФАЙЛ              перенести .repo хоста в систему (повторяется)
---package ИМЯ                 пакет (повторяется)
---bare                        без встроенного набора пакетов
---option КЛЮЧ=ЗНАЧЕНИЕ        параметр dnf (повторяется)
+Шифрование
+  --no-encryption               не шифровать корень
+  --keyfile                     открывать корень ключ-файлом
+  --detached-header             заголовок корня отдельно
+  --ssh-key "КЛЮЧ"              разблокировка по SSH (повторяется)
+  --passphrase-file ПУТЬ        файл парольной фразы (права 600)
 
---hostname ИМЯ  --timezone ЗОНА (по умолчанию UTC)
---kernel-arg ПАРАМЕТР         параметр ядра системы (повторяется)
---service ЮНИТ                служба systemd (повторяется)
---user ИМЯ[:ХЕШ]              пользователь (повторяется)
+Пакеты
+  --repo ID                     репозиторий носителя (повторяется)
+  --repo-priority ID=N          его приоритет 1…99 на время установки
+  --repo-file ФАЙЛ              перенести .repo носителя в систему (повторяется)
+  --repo-dir КАТАЛОГ            локальный каталог с пакетами (повторяется)
+  --repository id=…,baseurl=…   репозиторий из описания (повторяется)
+  --base ИМЯ                    основной набор вместо встроенного (повторяется)
+  --package ИМЯ                 дополнительный пакет (повторяется)
+  --bare                        без основного набора и условных пакетов
+  --grub ИМЯ                    имя GRUB (по умолчанию grub)
+  --option КЛЮЧ=ЗНАЧЕНИЕ        параметр dnf (повторяется)
 
---no-encryption               без шифрования корня (с --disk)
---detached-header             заголовок LUKS корня отдельно (с --disk)
---keyfile                     ключ-файл корня (с --disk)
---ssh-key "КЛЮЧ"              ключ для разблокировки по SSH (повторяется)
+Система
+  --hostname ИМЯ
+  --timezone ЗОНА               по умолчанию UTC
+  --user ИМЯ[:ХЕШ]              пользователь (повторяется)
+  --kernel-arg ПАРАМЕТР         параметр ядра (повторяется)
+  --service ЮНИТ                включить службу (повторяется)
 
---initrd-network none|dhcp|manual
---system-network none|dhcp|manual
-  и --initrd-/--system- interface, address, gateway, dns
---system-backend networkd|networkmanager
+Сеть
+  --initrd-network none|dhcp|manual    сеть в initramfs
+  --system-network none|dhcp|manual    сеть в системе
+  --initrd-/--system- interface, address, gateway, dns
+  --system-backend networkd|networkmanager
 
---config ГДЕ                  файл, https:// или git+URL#[ветка:]путь
---passphrase-file ПУТЬ        файл с парольной фразой (600)
---lang en|ru                  язык
---yes                         без подтверждения
+Прочее
+  --config ГДЕ                  файл, https:// или git+URL#[ветка:]путь
+  --lang en|ru                  язык
+  --yes                         без подтверждения YES
 ```
 
 ---
 
-## 🛡️ Проверка входных данных
+## ❓ Частые вопросы
 
-Правила одинаковы для флагов, мастера, TOML, URL и git; проверка идёт до первого действия над диском.
+**Как посмотреть, что будет сделано, ничего не стирая?** `moonshine-install check moonshine.toml --plan`.
 
-| Что | Правило |
-|---|---|
-| Диски | `/dev/…`, безопасные символы, без `..` |
-| Пути | абсолютные, без `..`, пробелов и спецсимволов |
-| Параметры dnf | `ключ=значение`, до 255 символов |
-| Пакеты, id | короткий алфавит, без ведущего `-` |
-| Пароли | без управляющих символов; хеши только допустимого формата |
-| SSH-ключи | одна строка, известный тип, без опций |
-| URL | `http(s)`; git: `https`, `http`, `ssh`, `git`; `ext::` и `file://` запрещены |
+**После установки не могу стать root.** Пользователь из `wheel` получает права root только через `sudo`. Войдите как `root` (если задавали ему пароль) и поставьте `sudo`, либо переустановите, добавив `sudo` в пакеты.
 
-Данные пользователя не попадают в оболочку: команды запускаются с отдельными аргументами.
+**При загрузке спрашивают пароль.** Это парольная фраза шифрования, которую задали на шаге «Шифрование». Чтобы её не вводить, выберите ключ-файл: ключ будет лежать на диске загрузки.
+
+**Шаг «Пакеты» пишет ошибку.** Чаще всего в репозитории нет пакета из списка или не хватает зависимости. Текст ошибки — это вывод `dnf`. Уберите пакет из поля «Пакеты» или добавьте нужный репозиторий.
+
+**Какой диск выбрать?** В мастере у каждого диска видно тип (SSD/HDD), размер и модель. Во флагах надёжнее путь из `ls -l /dev/disk/by-id/`.
 
 ---
 
-## 🏗️ Устройство
-
-```text
-Config ──► plan::build ──► Vec<Step> ──► exec::execute
- (CLI, TUI,   чистая         Run / Write /   по порядку,
-  TOML)       функция        Release         секреты через stdin
-```
-
-Порядок: освобождение дисков → разметка → RAID → LVM → форматирование и LUKS → монтирование → `dnf` → настройка → `dracut` → загрузчик → размонтирование и закрытие слоёв.
-
-| Модуль | Назначение |
-|---|---|
-| `main`, `cli`, `check` | вход, режимы, отчёт |
-| `plan`, `storage`, `layout` | шаги, хранилище, модель разметки |
-| `config`, `options`, `manifest`, `secrets` | конфигурация, флаги, TOML/URL/git |
-| `repository`, `repos`, `sources`, `resolve` | репозитории, расчёт пакетов |
-| `hardware`, `disks`, `network` | железо, диски, сеть |
-| `draft`, `app`, `ui`, `tui`, `editor`, `input` | мастер и редактор |
-| `exec`, `error`, `i18n` | выполнение, ошибки, язык |
-
----
-
-## 🧪 Сборка и тесты
-
-Rust edition 2024.
+## 🧪 Для разработчиков
 
 ```sh
 cargo build --release
@@ -705,26 +648,31 @@ cargo fmt && cargo clippy --all-targets && cargo test
 make -C dist check
 ```
 
-Тесты лежат в модулях `tests`, права root не нужны. На хосте нужны `dnf`, `sfdisk`, `wipefs`, `mount`, `dracut`; `git` и `curl` — для конфига из git и по URL.
+- Rust edition 2024. Тесты лежат в модулях `tests` и не требуют root.
+- На хосте нужны `dnf`, `sfdisk`, `wipefs`, `mount`, `dracut`; для конфига из сети — `curl` и `git`.
+- Тест `sources_use_only_glyphs_of_the_console_font` следит, чтобы в интерфейсе были только символы консольного шрифта evillin.
+
+Устройство: конфиг из мастера, флагов или TOML превращается в план — список шагов. План выполняется по порядку: освобождение дисков → разметка → RAID → LVM → LUKS и форматирование → монтирование → `dnf` → настройка → `dracut` → загрузчик → размонтирование. Пароли передаются командам через stdin, данные пользователя не попадают в оболочку.
+
+| Модуль | Назначение |
+|---|---|
+| `main`, `cli`, `check` | запуск, режимы, отчёт |
+| `plan`, `storage`, `layout` | шаги, хранилище, модель разметки |
+| `config`, `options`, `manifest`, `secrets` | настройки, флаги, TOML/URL/git |
+| `repository`, `repos`, `sources`, `resolve` | репозитории, расчёт пакетов |
+| `hardware`, `disks`, `network` | железо, диски, сеть |
+| `draft`, `app`, `ui`, `tui`, `editor`, `input` | мастер и редактор |
+| `exec`, `error`, `i18n` | выполнение, ошибки, язык |
 
 ---
 
 ## 🚧 Ограничения
 
-- Архитектуры: `x86_64`, `aarch64` (в тестировании); файловые системы: ext4, xfs, btrfs без подтомов.
+- Архитектуры: `x86_64`; `aarch64` в тестировании.
+- Файловые системы: ext4, xfs, btrfs (без подтомов).
 - Конфиг по URL и из git не проверяется подписью.
-- Группа LVM, занимающая и другой диск, остаётся там частично активной.
-
-Не проверено на реальных системах (проверялись планы и тесты):
-
-- LUKS: несколько устройств в initramfs, отдельный заголовок, LUKS на RAID и LVM, закрытие слоёв при завершении
-- RAID, LVM, тонкие тома, раздел `reserve`, модуль `usrmount`
-- загрузчик: имена пакетов `*-modules`, hybrid, `grubenv` и `grub.cfg` на FAT
-- `dnf` 4 и 5: `reposdir` со списком каталогов, `$releasever` хостовых репозиториев
-- параметры ядра при BLS-записях Fedora, `systemctl enable` и `mask` в установленной системе
-- btrfs, U-Boot, доставка утилит установщика
-- модуль dracut и юнит systemd на реальном образе
-- английские тексты не просматривались носителем языка
+- Группа LVM, занимающая и другой диск, остаётся на нём частично активной.
+- На реальном железе ещё не проверены: несколько зашифрованных устройств в initramfs, LUKS поверх RAID и LVM, тонкие тома, btrfs, U-Boot, модуль dracut и служба systemd на готовом образе.
 
 ---
 

@@ -478,11 +478,15 @@ pub fn packages(config: &Config) -> Vec<&'static str> {
     let layout = &config.layout;
     let mut names = Vec::new();
 
+    if layout.partitions.iter().any(|part| part.usage == Use::Boot) {
+        names.push("dosfstools");
+    }
+
     if layout.has_crypt() {
         names.push("cryptsetup");
     }
 
-    if layout.needs_lvm() {
+    if layout.has_crypt() || layout.needs_lvm() {
         names.push("lvm2");
     }
 
@@ -492,6 +496,10 @@ pub fn packages(config: &Config) -> Vec<&'static str> {
 
     if layout.needs_raid() {
         names.push("mdadm");
+    }
+
+    if layout.uses_fs(Fs::Ext4) {
+        names.push("e2fsprogs");
     }
 
     if layout.uses_fs(Fs::Xfs) {
@@ -946,14 +954,20 @@ mod tests {
 
     #[test]
     fn needed_packages_follow_the_layers() {
-        assert_eq!(packages(&lvm()), ["cryptsetup", "lvm2", "xfsprogs"]);
-        assert_eq!(packages(&raid()), ["cryptsetup", "lvm2", "mdadm"]);
-        assert!(
+        assert_eq!(
+            packages(&lvm()),
+            ["dosfstools", "cryptsetup", "lvm2", "e2fsprogs", "xfsprogs"]
+        );
+        assert_eq!(
+            packages(&raid()),
+            ["dosfstools", "cryptsetup", "lvm2", "mdadm", "e2fsprogs"]
+        );
+        assert_eq!(
             packages(&Config {
                 layout: Layout::simple("/dev/sda", "/dev/sda", Firmware::Uefi),
                 ..config()
-            })
-            .is_empty()
+            }),
+            ["dosfstools", "e2fsprogs"]
         );
     }
 

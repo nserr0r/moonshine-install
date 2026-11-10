@@ -1,6 +1,5 @@
 use crate::config::Arch;
 use crate::config::Config;
-use crate::config::Cpu;
 use crate::config::Firmware;
 use crate::config::ROOT;
 use crate::i18n::tr;
@@ -13,7 +12,15 @@ use crate::secrets;
 pub fn warnings(config: &Config, options: &Options) -> Vec<String> {
     let mut notes = Vec::new();
 
-    if !config.users.iter().any(|user| user.name == ROOT) {
+    if config.lacks_admin() {
+        notes.push(
+            tt!(
+                "root is locked and sudo is not among the packages: nobody will get root rights",
+                "root заблокирован, а sudo среди пакетов нет: права root не получит никто"
+            )
+            .into(),
+        );
+    } else if !config.users.iter().any(|user| user.name == ROOT) {
         notes.push(
             tt!(
                 "root is not listed: it will be locked, log in as a wheel user",
@@ -69,11 +76,10 @@ pub fn report(config: &Config, options: &Options) -> Vec<String> {
         tt!("The configuration is valid.", "Конфигурация корректна.").to_string(),
         String::new(),
         tr!(
-            "Platform:       {} · {} · {}",
-            "Платформа:      {} · {} · {}",
+            "Platform:       {} · {}",
+            "Платформа:      {} · {}",
             firmware(config.firmware),
-            arch(config.arch),
-            cpu(config.cpu)
+            arch(config.arch)
         ),
         tr!("Hostname:       {}", "Имя машины:     {}", config.hostname),
         tr!("Time zone:      {}", "Часовой пояс:   {}", config.timezone),
@@ -182,23 +188,30 @@ fn sources(config: &Config) -> Vec<String> {
         ));
     }
 
-    let set = if source.bare {
-        tt!(
-            "only the listed packages (--bare)",
-            "только указанные пакеты (--bare)"
-        )
-    } else {
-        tt!(
-            "built-in set + listed packages",
-            "встроенный набор + указанные пакеты"
-        )
-    };
+    if source.bare {
+        lines.push(tr!(
+            "  packages (--bare): {}",
+            "  пакеты (--bare): {}",
+            listed(&source.packages)
+        ));
+        return lines;
+    }
 
     lines.push(tr!(
-        "  packages: {set}, listed {}",
-        "  пакеты: {set}, указано {}",
-        source.packages.len()
+        "  base set: {}",
+        "  основной набор: {}",
+        listed(&source.distro.base)
     ));
+    lines.push(tr!(
+        "  extra packages: {}",
+        "  дополнительно: {}",
+        listed(&source.packages)
+    ));
+
+    if config.firmware != Firmware::Uboot {
+        lines.push(format!("  GRUB: {}", source.distro.grub));
+    }
+
     lines
 }
 
@@ -211,18 +224,10 @@ fn firmware(firmware: Firmware) -> &'static str {
     }
 }
 
-fn arch(arch: Arch) -> &'static str {
+pub fn arch(arch: Arch) -> &'static str {
     match arch {
         Arch::X86_64 => "x86_64",
         Arch::Aarch64 => "aarch64",
-    }
-}
-
-fn cpu(cpu: Cpu) -> &'static str {
-    match cpu {
-        Cpu::Intel => "Intel",
-        Cpu::Amd => "AMD",
-        Cpu::Other => tt!("other CPU", "другой процессор"),
     }
 }
 
@@ -283,7 +288,11 @@ mod tests {
     #[test]
     fn missing_root_hashes_the_phrase_and_the_network_are_pointed_out() {
         let options = options("--disk /dev/sda --hostname h --user u --repo r");
-        let notes = warnings(&config(), &options).join("\n");
+        let mut config = config();
+
+        config.source.packages.push("sudo".into());
+
+        let notes = warnings(&config, &options).join("\n");
 
         for expected in [
             "root не указан",
@@ -359,7 +368,8 @@ mod tests {
             "/dev/sda1",
             "репозиторий хоста evillin (приоритет 5)",
             "репозиторий из конфига c (приоритет 7)",
-            "встроенный набор + указанные пакеты, указано 1",
+            "дополнительно: vim",
+            "основной набор: bash",
             "Сеть в initramfs: нет",
         ] {
             assert!(text.contains(expected), "нет «{expected}»:\n{text}");

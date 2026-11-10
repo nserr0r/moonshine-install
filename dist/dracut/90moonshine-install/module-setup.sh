@@ -15,7 +15,7 @@ PROGRAMS=(
     reboot poweroff
 )
 
-OPTIONAL_PROGRAMS=(dnf dnf-3 dnf4 dnf5 rpm python3 sudo mkfs.btrfs thin_check)
+OPTIONAL_PROGRAMS=(dnf dnf-3 dnf4 dnf5 rpm python3 mkfs.btrfs thin_check)
 OPTIONAL_TREES=(
     /usr/lib/python3 /usr/lib64/python3 /usr/lib/python3.* /usr/lib64/python3.*
     /usr/share/dnf5 /usr/lib64/libdnf5 /usr/lib/libdnf5

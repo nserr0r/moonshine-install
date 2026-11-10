@@ -1,28 +1,24 @@
-# Пример конфига: один диск, шифрование корня ключ-файлом, свои репозитории с приоритетами.
-disk     = "/dev/sda"
+# Пример: один диск, корень зашифрован ключ-файлом, пакеты из репозитория evillin.
+# Проверить без изменений: moonshine-install check moonshine.toml --plan
+# Установить:              moonshine-install --config moonshine.toml
+
+disk     = "/dev/sda"               # этот диск будет СТЁРТ
 hostname = "moonshine"
 timezone = "Europe/Moscow"
-firmware = "hybrid"
-
-keyfile  = true                     # ключ корня лежит в initramfs, пароль не нужен
-repo     = ["updates"]              # репозиторий хоста из /etc/yum.repos.d
-repo_priority = ["updates=20"]      # его приоритет (только на время установки)
-package  = ["vim-enhanced", "htop"]
-option   = ["releasever=9"]
+keyfile  = true                     # ключ корня в initramfs: пароль при загрузке не нужен
 
 [[repository]]
-id       = "baseos"
-name     = "BaseOS"
-baseurl  = "https://mirror.evillin.online/9/BaseOS/$basearch/os/"
-priority = 10
-gpgkey   = "file:///etc/pki/rpm-gpg/RPM-GPG-KEY-example"
+id      = "evillin"
+baseurl = "https://repo.evillin.online/$basearch/"
+gpgkey  = "file:///etc/pki/rpm-gpg/RPM-GPG-KEY-evillin"
 
-[[repository]]
-id       = "company"
-baseurl  = "https://rpm.evillin.online/company/$basearch/"
-priority = 5
-gpgcheck = false
+[[users]]
+name = "root"
+hash = "$6$salt$replace-with-real-hash"   # хеш пароля: openssl passwd -6
 
 [[users]]
 name = "alice"
 hash = "$6$salt$replace-with-real-hash"
+
+[system]
+network = "dhcp"                    # сеть в установленной системе

@@ -274,14 +274,14 @@ fn patterns(key: &str, value: Option<&str>) -> Result<Vec<String>, Error> {
 mod tests {
     use super::*;
 
-    const FULL: &str = "id=rocky-baseos,name=Rocky BaseOS,baseurl=https://dl.rockylinux.org/pub/rocky/$releasever/BaseOS/$basearch/os/,priority=10,gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-Rocky";
+    const FULL: &str = "id=evil-baseos,name=Evil BaseOS,baseurl=https://mirror.evillin.online/$releasever/BaseOS/$basearch/os/,priority=10,gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-evillin";
 
     #[test]
     fn a_full_definition_is_read() {
         let repo = Repository::parse(FULL).unwrap();
 
-        assert_eq!(repo.id, "rocky-baseos");
-        assert_eq!(repo.name, "Rocky BaseOS");
+        assert_eq!(repo.id, "evil-baseos");
+        assert_eq!(repo.name, "Evil BaseOS");
         assert_eq!(repo.priority, Some(10));
         assert!(repo.gpgcheck);
         assert!(matches!(repo.origin, Origin::Baseurl(ref url) if url.contains("$releasever")));
@@ -293,7 +293,7 @@ mod tests {
 
         assert_eq!(
             repo.file_text(),
-            "[rocky-baseos]\nname=Rocky BaseOS\nbaseurl=https://dl.rockylinux.org/pub/rocky/$releasever/BaseOS/$basearch/os/\nenabled=1\ngpgcheck=1\ngpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-Rocky\npriority=10\n"
+            "[evil-baseos]\nname=Evil BaseOS\nbaseurl=https://mirror.evillin.online/$releasever/BaseOS/$basearch/os/\nenabled=1\ngpgcheck=1\ngpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-evillin\npriority=10\n"
         );
 
         let bare = Repository::parse("id=local,baseurl=http://mirror/x,gpgcheck=0").unwrap();
@@ -308,12 +308,12 @@ mod tests {
     #[test]
     fn exclude_and_includepkgs_are_space_separated_lists() {
         let repo = Repository::parse(
-            "id=r,metalink=https://m/x,gpgcheck=0,exclude=kernel* grub2*,includepkgs=vim",
+            "id=r,metalink=https://m/x,gpgcheck=0,exclude=kernel* grub*,includepkgs=vim",
         )
         .unwrap();
 
-        assert_eq!(repo.exclude, ["kernel*", "grub2*"]);
-        assert!(repo.file_text().contains("exclude=kernel* grub2*\n"));
+        assert_eq!(repo.exclude, ["kernel*", "grub*"]);
+        assert!(repo.file_text().contains("exclude=kernel* grub*\n"));
         assert!(repo.file_text().contains("metalink=https://m/x\n"));
         assert!(repo.file_text().ends_with("includepkgs=vim\n"));
     }

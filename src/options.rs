@@ -1,7 +1,6 @@
 use std::net::Ipv4Addr;
 
 use crate::config::Arch;
-use crate::config::Cpu;
 use crate::config::Firmware;
 use crate::config::Source;
 use crate::config::Uboot;
@@ -59,7 +58,6 @@ pub struct Options {
     pub timezone: String,
     pub firmware: Firmware,
     pub arch: Arch,
-    pub cpu: Cpu,
     pub uboot: Option<Uboot>,
     pub initrd_network: Network,
     pub system_network: Network,
@@ -78,8 +76,9 @@ Usage: moonshine-install (--disk /dev/sda [--boot-disk /dev/sdb] | --partition �
   [--package name]... [--option key=value]... [--kernel-arg ARG]... [--service UNIT]... [--repo-file /etc/yum.repos.d/x.repo]...
   [--repository id=ID,baseurl|metalink|mirrorlist=URL[,name=…][,priority=1..99][,gpgcheck=0|1][,gpgkey=URL][,exclude=…][,includepkgs=…]]...
   [--repo-priority ID=1..99]... [--bare]  (--bare: no built-in package set, everything comes from --package)
+  [--base name]... [--grub grub]  (--base replaces the base set, --package adds to it; --grub is the GRUB name, grub by default)
   [--boot-size 512]  (MiB, at least 256; /boot is FAT32 and doubles as the ESP)
-  [--timezone Europe/Moscow] [--firmware hybrid|uefi|bios|uboot] [--arch x86_64|aarch64] [--cpu intel|amd|other]
+  [--timezone Europe/Moscow] [--firmware hybrid|uefi|bios|uboot] [--arch x86_64|aarch64]
   [--uboot-image /path/u-boot.bin --uboot-offset sectors] [--keyfile] [--no-encryption] [--detached-header]
   [--ssh-key \"key\"]... [--passphrase-file /path] [--lang en|ru] [--yes]
   layout: --partition disk=/dev/sda,size=512MiB|rest|whole,point=biosboot|boot|reserve|swap|lvm:GROUP|raid:ARRAY|/path[,fs=ext4|xfs|btrfs][,mkfs=…][,options=…][,crypt=pass|key[,header=detached]]
@@ -92,8 +91,9 @@ Usage: moonshine-install (--disk /dev/sda [--boot-disk /dev/sdb] | --partition �
   [--package имя]... [--option ключ=значение]... [--repo-file /etc/yum.repos.d/x.repo]...
   [--repository id=ID,baseurl|metalink|mirrorlist=URL[,name=…][,priority=1..99][,gpgcheck=0|1][,gpgkey=URL][,exclude=…][,includepkgs=…]]...
   [--repo-priority ID=1..99]... [--bare]  (--bare: без встроенного набора пакетов, всё задаётся через --package)
+  [--base имя]... [--grub grub]  (--base заменяет основной набор, --package дополняет его; --grub — имя GRUB, по умолчанию grub)
   [--boot-size 512]  (MiB, не меньше 256; /boot — FAT32, он же ESP)
-  [--timezone Europe/Moscow] [--firmware hybrid|uefi|bios|uboot] [--arch x86_64|aarch64] [--cpu intel|amd|other]
+  [--timezone Europe/Moscow] [--firmware hybrid|uefi|bios|uboot] [--arch x86_64|aarch64]
   [--uboot-image /путь/u-boot.bin --uboot-offset секторов] [--keyfile] [--no-encryption] [--detached-header]
   [--ssh-key \"ключ\"]... [--passphrase-file /путь] [--lang en|ru] [--yes]
   разметка: --partition disk=/dev/sda,size=512MiB|rest|whole,point=biosboot|boot|reserve|swap|lvm:ГРУППА|raid:МАССИВ|/точка[,fs=ext4|xfs|btrfs][,mkfs=…][,options=…][,crypt=pass|key[,header=detached]]
@@ -132,12 +132,13 @@ struct Raw {
     boot_size: Option<u64>,
     custom: Layout,
     source: Source,
+    /// Основной набор из `--base`; без них остаётся набор по умолчанию.
+    base: Vec<String>,
     hostname: Option<String>,
     users: Vec<UserSpec>,
     timezone: String,
     firmware: Firmware,
     arch: Arch,
-    cpu: Cpu,
     plain: bool,
     detached: bool,
     keyfile: bool,
@@ -163,12 +164,12 @@ impl Raw {
             boot_size: None,
             custom: Layout::default(),
             source: Source::default(),
+            base: Vec::new(),
             hostname: None,
             users: Vec::new(),
             timezone: "UTC".into(),
             firmware: hardware.firmware,
             arch: hardware.arch,
-            cpu: hardware.cpu,
             plain: false,
             detached: false,
             keyfile: false,
@@ -208,6 +209,8 @@ impl Raw {
             "--package" => self.source.packages.push(next()?),
             "--option" => self.source.options.push(next()?),
             "--bare" => self.source.bare = true,
+            "--base" => self.base.push(next()?),
+            "--grub" => self.source.distro.grub = next()?,
             "--hostname" => self.hostname = Some(next()?),
             "--user" => self.users.push(UserSpec::parse(&next()?)?),
             "--timezone" => self.timezone = next()?,
@@ -215,7 +218,6 @@ impl Raw {
             "--kernel-arg" => self.kernel_args.push(next()?),
             "--service" => self.services.push(next()?),
             "--arch" => self.arch = parse_arch(&next()?)?,
-            "--cpu" => self.cpu = parse_cpu(&next()?)?,
             "--firmware" => self.firmware = parse_firmware(&next()?)?,
             "--system-backend" => self.backend = parse_backend(&next()?)?,
             _ if flag.starts_with("--initrd-") => {
@@ -255,8 +257,12 @@ impl Raw {
         Ok(())
     }
 
-    fn finish(self) -> Result<Options, Error> {
+    fn finish(mut self) -> Result<Options, Error> {
         let layout = self.layout()?;
+
+        if !self.base.is_empty() {
+            self.source.distro.base = std::mem::take(&mut self.base);
+        }
 
         if self.users.is_empty() {
             return Err(Error::Invalid(tr!(
@@ -289,7 +295,6 @@ impl Raw {
             timezone: self.timezone,
             firmware: self.firmware,
             arch: self.arch,
-            cpu: self.cpu,
             initrd_network: self.initrd.into_network(initrd)?,
             system_network: self.system.into_network("none")?,
             backend: self.backend,
@@ -391,18 +396,6 @@ fn parse_arch(text: &str) -> Result<Arch, Error> {
         other => Err(Error::Invalid(tr!(
             "unknown architecture: {other}",
             "неизвестная архитектура: {other}"
-        ))),
-    }
-}
-
-fn parse_cpu(text: &str) -> Result<Cpu, Error> {
-    match text {
-        "intel" => Ok(Cpu::Intel),
-        "amd" => Ok(Cpu::Amd),
-        "other" => Ok(Cpu::Other),
-        other => Err(Error::Invalid(tr!(
-            "unknown CPU: {other}",
-            "неизвестный процессор: {other}"
         ))),
     }
 }
@@ -532,6 +525,22 @@ mod tests {
     }
 
     #[test]
+    fn distro_names_replace_the_defaults() {
+        let base = "--disk /dev/sda --hostname h --user u --repo r";
+        let distro = parse(&format!("{base} --base kernel --base @core --grub mygrub"))
+            .unwrap()
+            .source
+            .distro;
+
+        assert_eq!(distro.base, ["kernel", "@core"]);
+        assert_eq!(distro.grub, "mygrub");
+        assert_eq!(
+            parse(base).unwrap().source.distro,
+            crate::config::Distro::default()
+        );
+    }
+
+    #[test]
     fn packages_come_from_repositories_and_local_directories_with_extras() {
         let base = "--disk /dev/sda --hostname h --user u";
         let line = format!(
@@ -555,12 +564,12 @@ mod tests {
     fn repositories_priorities_and_bare_are_read() {
         let base = "--disk /dev/sda --hostname h --user u";
         let line = format!(
-            "{base} --repo evillin --repo-priority evillin=5 --repository id=rocky,baseurl=https://m/x,priority=10,gpgcheck=0 --bare --package bash"
+            "{base} --repo evillin --repo-priority evillin=5 --repository id=evil,baseurl=https://m/x,priority=10,gpgcheck=0 --bare --package bash"
         );
         let source = parse(&line).unwrap().source;
 
         assert_eq!(source.priorities, [("evillin".to_string(), 5)]);
-        assert_eq!(source.repositories[0].id, "rocky");
+        assert_eq!(source.repositories[0].id, "evil");
         assert_eq!(source.repositories[0].priority, Some(10));
         assert!(source.bare);
         assert!(parse(&format!("{base} --repository id=r")).is_err());
@@ -647,12 +656,12 @@ mod tests {
 
     #[test]
     fn required_and_optional_arguments_are_read() {
-        let options = parse("--disk /dev/sda --repo evillin --hostname moon --user alice --firmware bios --arch x86_64 --cpu intel --no-encryption --ssh-key key --ssh-key other").unwrap();
+        let options = parse("--disk /dev/sda --repo evillin --hostname moon --user alice --firmware bios --arch x86_64 --no-encryption --ssh-key key --ssh-key other").unwrap();
 
         assert_eq!(options.layout.root_device(), "/dev/sda3");
         assert_eq!(options.source.repos, ["evillin"]);
         assert_eq!(options.firmware, Firmware::Bios);
-        assert_eq!((options.arch, options.cpu), (Arch::X86_64, Cpu::Intel));
+        assert_eq!(options.arch, Arch::X86_64);
         assert_eq!(options.timezone, "UTC");
         assert_eq!(options.ssh_keys, ["key", "other"]);
         assert!(!options.layout.has_crypt() && !options.assume_yes);
@@ -667,7 +676,6 @@ mod tests {
             Arch::Aarch64
         );
         assert!(parse(&format!("{base} --arch riscv")).is_err());
-        assert!(parse(&format!("{base} --cpu via")).is_err());
     }
 
     #[test]

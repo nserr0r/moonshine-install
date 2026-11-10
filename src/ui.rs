@@ -262,8 +262,8 @@ fn draw_editor(frame: &mut Frame, area: Rect, app: &App, editor: &Editor) {
         .take(rows)
         .map(|(position, entry)| {
             let marker = match editor.folded(&entry.node) {
-                Some(true) => "▸ ",
-                Some(false) => "▾ ",
+                Some(true) => "▶ ",
+                Some(false) => "▼ ",
                 None => "  ",
             };
             let text = editor.text(&entry.node, |disk| app.draft.disk_size(disk));
@@ -417,7 +417,7 @@ fn draw_popup(frame: &mut Frame, area: Rect, popup: &Popup, title: &str, checked
         } else {
             Style::new()
         };
-        let marker = if selected { "▸ " } else { "  " };
+        let marker = if selected { "▶ " } else { "  " };
 
         let check = match checked.map(|flags| flags[*option]) {
             Some(true) => "[x] ",
@@ -444,7 +444,7 @@ fn draw_sidebar(frame: &mut Frame, area: Rect, app: &App) {
         .map(|(index, page)| {
             let current = index == app.page;
             let (mark, style) = if current {
-                ("▸", accent())
+                ("▶", accent())
             } else if app.visited[index] && !app.draft.page_errors(*page).is_empty() {
                 ("✗", error_style())
             } else if app.visited[index] {
@@ -568,8 +568,8 @@ fn field_lines(
     bar: usize,
 ) -> (Vec<Line<'static>>, Option<(usize, usize)>) {
     let marker = match (focused, editing) {
-        (true, true) => "✎ ",
-        (true, false) => "▸ ",
+        (true, true) => "» ",
+        (true, false) => "▶ ",
         _ => "  ",
     };
     let label_style = if focused { accent() } else { Style::new() };
@@ -600,7 +600,7 @@ fn field_lines(
                 Span::styled(
                     format!(
                         "{:<width$}",
-                        tt!("Open the editor ▸", "Открыть редактор ▸"),
+                        tt!("Open the editor ▶", "Открыть редактор ▶"),
                         width = bar
                     ),
                     bar_style(focused),
@@ -650,7 +650,7 @@ fn select_bar(field: &Field, bar: usize, focused: bool) -> Line<'static> {
     Line::from(vec![
         Span::raw("  "),
         Span::styled(
-            format!("{shown}{} ▾", " ".repeat(padding)),
+            format!("{shown}{} ▼", " ".repeat(padding)),
             bar_style(focused),
         ),
     ])
@@ -680,10 +680,13 @@ fn summary_lines(app: &App) -> Vec<Line<'static>> {
             tt!("Disk scheme", "Схема дисков"),
             draft.field(Id::Scheme).choice_text().to_string(),
         ),
-        (tt!("Hardware", "Железо"), draft.hardware.summary()),
         (
-            tt!("Firmware", "Прошивка"),
-            draft.field(Id::Firmware).choice_text().to_string(),
+            tt!("Platform", "Платформа"),
+            format!(
+                "{} · {}",
+                crate::check::arch(draft.hardware.arch),
+                draft.field(Id::Firmware).choice_text()
+            ),
         ),
         (tt!("Repositories", "Репозитории"), source_text(draft)),
         (
@@ -756,14 +759,28 @@ fn summary_lines(app: &App) -> Vec<Line<'static>> {
             ),
             error_style(),
         ))),
-        None => lines.push(Line::from(Span::styled(
-            tr!(
-                "  ⚠ All data on {} will be erased",
-                "  ⚠ Все данные на {} будут стёрты",
-                erased_disks(draft)
-            ),
-            Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-        ))),
+        None => {
+            let warning = Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+
+            if draft.to_config().is_ok_and(|config| config.lacks_admin()) {
+                lines.push(Line::from(Span::styled(
+                    tt!(
+                        "  ▲ No sudo among the packages: the user will not get root rights",
+                        "  ▲ Среди пакетов нет sudo: пользователь не получит права root"
+                    ),
+                    warning,
+                )));
+            }
+
+            lines.push(Line::from(Span::styled(
+                tr!(
+                    "  ▲ All data on {} will be erased",
+                    "  ▲ Все данные на {} будут стёрты",
+                    erased_disks(draft)
+                ),
+                warning,
+            )));
+        }
     }
 
     lines.push(Line::raw(""));
@@ -899,10 +916,10 @@ fn source_text(draft: &Draft) -> String {
 
     sources.extend(draft.field(Id::LocalRepos).items.iter().cloned());
     tr!(
-        "{} · extra packages: {}",
-        "{} · доп. пакетов: {}",
+        "{} · packages: {}",
+        "{} · пакетов: {}",
         sources.join(", "),
-        draft.field(Id::Packages).items.len()
+        crate::draft::words(draft.field(Id::Packages).value()).len()
     )
 }
 
@@ -974,7 +991,7 @@ fn draw_plan(frame: &mut Frame, area: Rect, app: &App, failed: bool) {
             let (marker, style) = match index.cmp(&progress.done) {
                 std::cmp::Ordering::Less => ("✓", dim()),
                 std::cmp::Ordering::Equal if failed => ("✗", error_style()),
-                std::cmp::Ordering::Equal => ("▸", accent()),
+                std::cmp::Ordering::Equal => ("▶", accent()),
                 std::cmp::Ordering::Greater => ("·", Style::new().fg(Color::White)),
             };
 
@@ -1086,6 +1103,42 @@ mod tests {
         app.visited[3] = true;
 
         assert!(render(&app, 100, 40).contains("✗"));
+    }
+
+    /// Знаки консольного шрифта evillin, которые есть в нём при любом размере и числе глифов.
+    const CONSOLE_GLYPHS: &str = concat!(
+        "АБВГДЕЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯабвгдежзийклмнопрстуфхцчшщъыьэюяЁё",
+        "ЄІЇЎҐєіїўґ",
+        "\u{a0}§©«°±·»×–—‘’“”„•…€№←↑→↓≠≤≥",
+        "─│┌┐└┘├┤┬┴┼═║╒╓╔╕╖╗╘╙╚╛╜╝╞╟╠╡╢╣╤╥╦╧╨╩╪╫╬╭╮╯╰",
+        "▀▄█▌▐░▒▓■▲▶▼◀◆○●✓✗\u{fffd}",
+    );
+
+    #[test]
+    fn sources_use_only_glyphs_of_the_console_font() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            let text = std::fs::read_to_string(&path).unwrap();
+            let foreign: String = text
+                .chars()
+                .filter(|&c| !c.is_ascii() && !CONSOLE_GLYPHS.contains(c))
+                .collect();
+
+            assert!(foreign.is_empty(), "{}: {foreign}", path.display());
+        }
+    }
+
+    #[test]
+    fn the_summary_warns_when_nobody_gets_root_rights() {
+        let mut app = App::new(filled());
+
+        app.page = Page::ALL.len() - 1;
+        assert!(render(&app, 100, 30).contains("нет sudo"));
+
+        app.draft.field_mut(Id::Packages).input = crate::input::Input::with("kernel sudo");
+        assert!(!render(&app, 100, 30).contains("нет sudo"));
     }
 
     #[test]
@@ -1314,7 +1367,7 @@ mod tests {
             selected: 150,
         });
 
-        assert!(render(&app, 100, 20).contains("▸ zone150"));
+        assert!(render(&app, 100, 20).contains("▶ zone150"));
     }
 
     #[test]
@@ -1331,7 +1384,7 @@ mod tests {
         let screen = render(&app, 120, 24);
 
         assert!(
-            screen.contains("Правка: Enter готово") && screen.contains('✎'),
+            screen.contains("Правка: Enter готово") && screen.contains('»'),
             "{screen}"
         );
     }
@@ -1378,7 +1431,7 @@ mod tests {
 
         for expected in [
             "Редактор разметки",
-            "▾ /dev/sda",
+            "▼ /dev/sda",
             "/dev/sda2",
             "✓ разметка корректна",
         ] {
@@ -1425,7 +1478,7 @@ mod tests {
     fn the_key_bar_wraps_by_width_and_follows_the_context() {
         let keys = [
             ("n", "добавить"),
-            ("NUM+ NUM−", "развернуть всё"),
+            ("NUM+ NUM-", "развернуть всё"),
             ("Esc", "готово"),
         ];
 
@@ -1438,7 +1491,7 @@ mod tests {
 
         let screen = render(&app, 100, 30);
 
-        for expected in [" n ", "раздел", "NUM+ NUM−", " Esc ", "удалить диск"] {
+        for expected in [" n ", "раздел", "NUM+ NUM-", " Esc ", "удалить диск"] {
             assert!(screen.contains(expected), "нет «{expected}»:\n{screen}");
         }
     }

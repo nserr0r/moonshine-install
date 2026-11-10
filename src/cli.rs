@@ -223,7 +223,6 @@ fn read_config(options: &Options, mode: Mode) -> Result<Config, Error> {
         firmware: options.firmware,
         source: options.source.clone(),
         arch: options.arch,
-        cpu: options.cpu,
         hostname: options.hostname.clone(),
         users,
         passphrase,

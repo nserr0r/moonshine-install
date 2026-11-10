@@ -816,7 +816,7 @@ impl Editor {
 
         keys.extend([("r", "RAID"), ("v", tt!("LVM volume", "том LVM"))]);
         keys.push((
-            "NUM+ NUM−",
+            "NUM+ NUM-",
             tt!("expand / collapse all", "развернуть / свернуть всё"),
         ));
 
@@ -1425,7 +1425,7 @@ mod tests {
         assert!(has(&editor, "e") && !has(&editor, "f"));
 
         press(&mut editor, &[KeyCode::End]);
-        assert!(has(&editor, "f") && has(&editor, "NUM+ NUM−"));
+        assert!(has(&editor, "f") && has(&editor, "NUM+ NUM-"));
 
         press(&mut editor, &[KeyCode::Char('d')]);
         assert!(has(&editor, "u"));

@@ -2,7 +2,7 @@
 
 # 🌙 moonshine-install
 
-**Installer for RPM systems from repositories: wizard, CLI and config (file, URL, git).**
+**The evillin installer: partitions the disk, encrypts it, installs packages from repositories and sets up booting.**
 
 🌐 [Русский](README.md) · **English**
 
@@ -10,235 +10,257 @@
 
 ---
 
-**🚀 Idea:** the system is built by `dnf --installroot` from your repositories straight onto the new disk. A machine is described by one small file.
+## 🌙 What it is
 
-> ⚠️ The installer **erases disks**. First run `moonshine-install check TARGET --plan`.
+`moonshine-install` installs the system onto a clean disk. There are three ways to use it:
+
+| Way | For | Command |
+|---|---|---|
+| **Wizard** | a first install: questions on screen, everything picked from lists | `moonshine-install` |
+| **Config** | identical and unattended installs: everything in one file | `moonshine-install --config moonshine.toml` |
+| **Flags** | scripts and quick checks | `moonshine-install --disk /dev/sda …` |
+
+> ⚠️ The installer **erases the chosen disks completely**. Before installing from a config, run `moonshine-install check moonshine.toml --plan`: it shows what will be done and changes nothing.
 
 ---
 
-## ⚙️ Usage
+## 🧰 What you need
 
-1. Wizard:
+1. A computer or virtual machine booted from the evillin install media. Any running system with `dnf` and the `moonshine-install` package works too.
+2. Root rights.
+3. Access to the evillin repository: over the network or in a local directory.
+4. A disk whose data you do not need.
 
-```sh
-sudo moonshine-install
-```
+---
 
-2. Check a config without changing anything:
+## 🚀 First install (wizard)
 
-```sh
-moonshine-install check https://evillin.online/moonshine.toml --plan
-```
-
-3. Install from a config (file, `https://`, `git+URL#branch:path.toml`):
+1. Boot from the install media and log in as `root`.
+2. Start the wizard:
 
 ```sh
-sudo moonshine-install --config https://evillin.online/moonshine.toml
+moonshine-install
 ```
 
-4. Install with flags:
+3. Go through the eight steps. The steps are on the left, the fields of the current step on the right:
+
+| Step | What to choose | If unsure |
+|---|---|---|
+| 1. Encryption | whether to encrypt the disk and how to open it | keep "Yes" and set a passphrase: it is asked at every boot |
+| 2. Disk | the scheme, the system disk, the boot disk | "One disk", the right disk from the list, "Same disk" |
+| 3. Repositories | where packages come from and which to install | keep everything as is |
+| 4. System and user | hostname, user, password, time zone | enter the user `root` if `sudo` is not in the package list |
+| 5. Network in initramfs | network before the disk is unlocked | "none" unless you need unlocking over SSH |
+| 6. Network in system | network after boot | "DHCP" |
+| 7. Packages | the final package list with dependencies | just look |
+| 8. Summary | overview and confirmation | read the ▲ warnings |
+
+4. On the "Summary" step type `YES`: the install starts and every action is shown on screen.
+5. When "Done" appears, remove the media and reboot.
+
+Main keys:
+
+| Keys | Action |
+|---|---|
+| `↑` `↓` | field or list item |
+| `Enter` / `→` | edit a field, open a list, choose |
+| `←` / `Esc` | back, cancel |
+| `Space` | toggle "Yes/No", open a list |
+| `Tab` / `Shift+Tab` | next / previous step |
+| `e` / `F2` | edit the value as text |
+| `Ctrl+C` | quit without changes |
+
+---
+
+## 📄 Install from a config
+
+1. Take the example [`dist/examples/moonshine.toml`](dist/examples/moonshine.toml) (after installing the package it is in `/usr/share/doc/moonshine-install/`).
+2. Set the disk, the hostname and the repository.
+3. Get a password hash: the command asks for the password and prints a `$6$…` line.
 
 ```sh
-sudo moonshine-install --disk /dev/sda --repo baseos --hostname moonshine \
-  --user alice:'$6$salt$...' --timezone Europe/Moscow
+openssl passwd -6
 ```
 
-Minimal `moonshine.toml`:
+4. Put the hash into `hash`:
 
 ```toml
 disk     = "/dev/sda"
 hostname = "moonshine"
-repo     = ["baseos"]
+
+[[repository]]
+id      = "evillin"
+baseurl = "https://repo.evillin.online/$basearch/"
+gpgkey  = "file:///etc/pki/rpm-gpg/RPM-GPG-KEY-evillin"
 
 [[users]]
-name = "alice"
-hash = "$6$salt$..."             # openssl passwd -6
+name = "root"
+hash = "$6$…"
 ```
 
-Before erasing, the installer asks for `YES`; `--yes` skips the question.
-
----
-
-## ✨ Features
-
-- 🖥️ **Wizard** (TUI), **CLI**, **TOML config**
-- 📦 **Repositories**: host, local, from the config; yum-style priorities
-- 💾 **Layout**: partitions, **mdadm RAID**, **LVM2** (including thin volumes), ext4 / xfs / btrfs, swap
-- 🔐 **LUKS2** on any device: passphrase or key file, detached header, unlock over SSH
-- 🔌 **Boot from a separate disk** (USB stick)
-- 🌐 **Platforms**: BIOS+UEFI (hybrid), UEFI, BIOS, U-Boot
-- 🧩 **Kernel options** and **systemd services**
-- 🛠️ **Network**: separately for initramfs and the system
-- 💿 **dracut module**: install from media or over the network
-- 🌍 **Languages**: English, Русский
-
-| Architecture | Status |
-|---|---|
-| x86_64 | supported |
-| aarch64 | in testing |
-
----
-
-## 🔎 Hardware
-
-Detected at start; override with `--arch`, `--cpu`, `--firmware`.
-
-| What | Source | Result |
-|---|---|---|
-| Architecture | binary | `x86_64` / `aarch64` |
-| CPU | `/proc/cpuinfo` | Intel → `microcode_ctl` |
-| Firmware | x86_64 → **hybrid**; aarch64 → UEFI if `/sys/firmware/efi` exists, else U-Boot | layout, bootloader |
-
-| Platform | `grub2-install --target` |
-|---|---|
-| hybrid | `i386-pc`, `i386-efi`, `x86_64-efi` |
-| uefi | `x86_64-efi` / `arm64-efi` |
-| bios | `i386-pc` |
-| uboot | `extlinux/extlinux.conf` |
-
-Commands run in a `chroot` with `--no-nvram --force --removable`, followed by `grub2-mkconfig`.
-
----
-
-## 📦 Repositories and packages
-
-| Source | Flag / key | Stays in the system |
-|---|---|---|
-| Host repository | `--repo ID` | via `--repo-file` |
-| Local directory | `--repo-dir PATH` | no |
-| Config repository | `--repository …` / `[[repository]]` | yes |
-
-```toml
-[[repository]]
-id       = "baseos"
-baseurl  = "https://mirror.evillin.online/9/BaseOS/$basearch/os/"
-priority = 10                   # 1…99, lower = more important
-gpgkey   = "file:///etc/pki/rpm-gpg/RPM-GPG-KEY-example"
-
-[[repository]]
-id       = "company"
-baseurl  = "https://rpm.evillin.online/company/$basearch/"
-priority = 5
-gpgcheck = false
-```
-
-| Key | Meaning |
-|---|---|
-| `id` | required, unique |
-| `baseurl` / `metalink` / `mirrorlist` | exactly one |
-| `name`, `priority`, `exclude`, `includepkgs` | optional |
-| `gpgcheck` | enabled by default |
-| `gpgkey` | required while `gpgcheck` is on |
-
-- Host repository priority: `--repo-priority ID=N`, during installation only.
-- dnf options: `--option key=value` (`releasever=44` → `--releasever=44`).
-- Packages: `--package NAME` (name, `@group`, pattern); `--bare` disables the built-in set.
-- The package list with dependencies is shown before installation.
-
-### Another RPM distribution
-
-Requires `dnf`, GRUB2 (`grub2-install`, `grub2-mkconfig`) and `dracut`. With `--bare` the package list is fully yours:
-
-```toml
-bare     = true
-firmware = "hybrid"
-disk     = "/dev/sda"
-hostname = "rocky"
-option   = ["releasever=9"]
-package  = ["@core", "kernel", "dracut", "grub2-tools", "grub2-pc-modules",
-            "grub2-efi-ia32-modules", "grub2-efi-x64-modules", "cryptsetup", "sudo"]
-
-[[repository]]
-id       = "baseos"
-baseurl  = "https://mirror.evillin.online/9/BaseOS/$basearch/os/"
-priority = 10
-gpgkey   = "file:///etc/pki/rpm-gpg/RPM-GPG-KEY-example"
-
-[[users]]
-name = "alice"
-hash = "$6$salt$..."
-```
-
----
-
-## 👤 Users
+5. Check the config. Disks are not touched:
 
 ```sh
-moonshine-install ... --user alice:'$6$salt$hash' --user bob
+moonshine-install check moonshine.toml --plan
 ```
 
-- If `root` is not listed, it is locked.
-- Others get a home directory and the **wheel** group; `sudo` is installed.
-- Without a hash the password is asked on the console.
+6. Install:
+
+```sh
+moonshine-install --config moonshine.toml
+```
+
+Before erasing, the installer asks you to type `YES`. The `--yes` flag skips the question: use it for unattended installs.
+
+The config does not have to be a local file:
+
+```sh
+moonshine-install --config https://evillin.online/moonshine.toml
+moonshine-install --config 'git+https://git.evillin.online/infra.git#main:machines/moonshine.toml'
+```
 
 ---
 
-## 🧩 Kernel and services
+## 📖 Glossary
 
-| What | Flag | TOML | Wizard |
-|---|---|---|---|
-| Kernel options | `--kernel-arg` | `kernel_arg = ["quiet"]` | "Kernel options" |
-| Services | `--service` | `service = ["sshd"]` | "Services to enable" |
-
-- Options are appended to `GRUB_CMDLINE_LINUX` (`/etc/default/grub`) and written to `/etc/kernel/cmdline`.
-- Printable ASCII without spaces, quotes, `$`, `` ` `` and `\` is allowed.
-- Services are enabled with `systemctl enable` in the `chroot`; add the service package to `--package`.
-
----
-
-## 🛠️ Network
-
-Configured separately for initramfs (`--initrd-*`, `[initrd]`) and the system (`--system-*`, `[system]`).
-
-| Mode | Meaning |
+| Word | Meaning |
 |---|---|
-| `none` | no network |
-| `dhcp` | DHCP, `interface` optional |
-| `manual` | `interface`, `address`, `gateway` required; `dns` repeats |
+| **Repository** | a server or directory with `.rpm` packages; `dnf` builds the system from them |
+| **Password hash** | an encrypted form of a password (`$6$…`); the password itself is not stored in the config |
+| **LUKS** | disk encryption; without the passphrase or key the data cannot be read |
+| **LUKS header** | the service part of an encrypted disk; it can be kept separately, for example on a USB stick |
+| **initramfs** | a small system that boots first: it opens the disks and hands over to the main system |
+| **dracut** | the program that builds the initramfs |
+| **/boot** | the partition with the kernel and bootloader; never encrypted; here it is also the UEFI ESP |
+| **BIOS / UEFI** | ways a computer boots; on x86_64 both are installed at once (hybrid) |
+| **U-Boot** | the bootloader of ARM boards |
+| **LVM** | volumes that can be split and grown on top of one or more disks |
+| **RAID** | several disks acting as one: a mirror (RAID1) or striped |
+| **wheel / sudo** | the administrators group and the program that gives them root rights |
 
-- The system service is set by `--system-backend networkd|networkmanager`.
-- The other service is masked (`systemctl mask`) and the chosen one is enabled: `networkmanager` masks `systemd-networkd`, `networkd` masks `NetworkManager`. A missing unit is not an error.
-- `--ssh-key` installs dracut-sshd and requires a network in initramfs.
+---
+
+## 📦 Packages
+
+The **base set** is always installed. In the wizard it is the "Packages" field on the "Repositories" step, in a config it is `base`:
+
+```text
+bash coreutils dnf dracut evillin-fonts-console evillin-release kbd kernel lvm2 openssh-server rpm shadow-utils systemd util-linux
+```
+
+**By condition** the installer adds what the system cannot boot without:
+
+| Condition | Packages |
+|---|---|
+| GRUB (BIOS/UEFI) | `grub-tools`, `grub-*-modules` per platform |
+| U-Boot | `uboot-tools` |
+| `/boot` partition | `dosfstools` |
+| Encryption | `cryptsetup`, `lvm2` |
+| LVM / thin volumes | `lvm2` / `device-mapper-persistent-data` |
+| RAID | `mdadm` |
+| ext4 / xfs / btrfs | `e2fsprogs` / `xfsprogs` / `btrfs-progs` |
+| Network in initramfs | `dracut-network` |
+| SSH keys for unlocking | `dracut-sshd`, `openssh-server` |
+| Network via NetworkManager | `NetworkManager` |
+| Network via systemd-networkd | `systemd-networkd`, `systemd-resolved` when DNS servers are set manually |
+
+A package already in the list is not added again.
+
+| What | Flag / key |
+|---|---|
+| Replace the base set | `--base NAME` / `base = […]` |
+| Add packages | `--package NAME` / `package = […]`: a name, `@group` or a pattern |
+| Only your packages, no base set and no conditional ones | `--bare` / `bare = true` |
+| GRUB name (`NAME-tools`, `NAME-install`, `/boot/NAME`) | `--grub NAME` / `grub`, `grub` by default |
+
+---
+
+## 👤 Users and rights
+
+```toml
+[[users]]
+name = "root"
+hash = "$6$…"
+
+[[users]]
+name = "alice"
+hash = "$6$…"
+```
+
+1. `root` in the list gets a password. If `root` is not in the list, it is **locked**.
+2. Other users get a home directory and the `wheel` group.
+3. A `wheel` user gets root rights only through `sudo`, and `sudo` is not in the base set. Add `sudo` to the packages or list the `root` user. If you do neither, nobody gets root rights: `check` and the "Summary" step warn about it.
+4. Without a hash the password is asked on the console.
+
+---
+
+## 🔐 Encryption
+
+Any device can be encrypted: a partition, a RAID array, an LVM physical or logical volume.
+
+| Method | Key | At boot |
+|---|---|---|
+| Passphrase | `crypt=pass` | the passphrase is typed on the console or over SSH |
+| Key file | `crypt=key` | the key is in the initramfs on the boot disk, nothing to type |
+| Detached header | `header=detached` | the header is in `/etc/luks` and in the initramfs |
+
+- For a simple scheme flags are enough: `--no-encryption` (do not encrypt), `--keyfile` (key file), `--detached-header` (detached header).
+- One passphrase for all `crypt=pass` devices.
+- `/boot` and `biosboot` are never encrypted.
+- At boot the initramfs opens only the root and `/usr`; the system opens the rest from `/etc/crypttab`.
+- A key file for the root requires a detached header.
+
+**Unlocking over SSH.** `--ssh-key "ssh-ed25519 …"` installs `dracut-sshd`: after power-on you connect over SSH and type the passphrase. It needs network in the initramfs (`[initrd]`).
+
+**Booting from a USB stick.** Set `--boot-disk` or "Disk for the kernel and bootloader" in the wizard. The stick gets the kernel, the bootloader and the initramfs with keys and headers. The system disk stays without a partition table: the system does not boot without the stick.
+
+> ⚠️ If you lose the stick with the key and header, the data cannot be recovered. Keep a copy of the headers elsewhere.
 
 ---
 
 ## 💾 Disks and layout
 
-A disk is given by path: `/dev/sda`, `/dev/nvme0n1` or `/dev/disk/by-id/…` (preferred).
+A disk is given by path: `/dev/sda`, `/dev/nvme0n1`. A path from `/dev/disk/by-id/…` is safer: it does not change between boots.
 
-| Scheme | Layout |
+**Ready schemes:**
+
+| Scheme | Result |
 |---|---|
-| `--disk` | biosboot (BIOS, hybrid) + `/boot` FAT32 + root |
-| `--disk` + `--boot-disk` | boot on the second disk, system on the whole disk without a partition table |
-| U-Boot | `/boot` as the first partition with a 16 MiB offset |
+| One disk | `biosboot` 4 MiB (for BIOS) + `/boot` 512 MiB + root |
+| Separate boot disk | `/boot` on the second disk, the whole first disk for the system |
+| LVM, RAID + LVM | in the wizard, from several disks |
+| U-Boot | `/boot` as the first partition with a 16 MiB gap for the board bootloader |
 
-- `/boot` is FAT32 and doubles as the ESP. Default 512 MiB (`--boot-size`, minimum 256).
-- The wizard also offers "LVM" and "RAID + LVM" over several disks.
+`/boot` is a FAT32 partition and also the ESP. Size: `--boot-size` (from 256, 512 MiB by default).
 
 ### Custom layout
 
+In the wizard: step "Disk" → "Disk scheme" → "Custom layout" → "Open the editor". In flags and configs there are three kinds of lines:
+
 ```text
---partition disk=DISK,size=SIZE,point=POINT[,fs=ext4|xfs|btrfs][,mkfs=…][,options=…][,crypt=pass|key[,header=detached]]
---raid      name=NAME,level=0|1|5|6|10,point=POINT[,fs=…][,mkfs=…][,options=…][,crypt=…]
---volume    vg=GROUP,name=NAME,size=SIZE,point=POINT[,pool=POOL][,fs=…][,mkfs=…][,options=…][,crypt=…]
+--partition disk=DISK,size=SIZE,point=PURPOSE[,fs=ext4|xfs|btrfs][,mkfs=…][,options=…][,crypt=pass|key[,header=detached]]
+--raid      name=NAME,level=0|1|5|6|10,point=PURPOSE[,fs=…][,mkfs=…][,options=…][,crypt=…]
+--volume    vg=GROUP,name=NAME,size=SIZE,point=PURPOSE[,pool=POOL][,fs=…][,mkfs=…][,options=…][,crypt=…]
 ```
 
 | `size` | Meaning |
 |---|---|
 | `512MiB`, `40GiB` | exact size |
-| `rest` | the remainder |
-| `whole` | whole disk, no partition table |
+| `rest` | all remaining space |
+| `whole` | the whole disk, no partition table |
 
 | `point` | Meaning |
 |---|---|
-| `biosboot` | 4 MiB for GRUB (BIOS, hybrid) |
-| `reserve` | empty partition the size of `biosboot` and `/boot` |
+| `/`, `/home`, `/var`, … | a file system mounted there |
 | `boot` | `/boot`, FAT32, always a plain partition |
+| `biosboot` | 4 MiB for GRUB when booting via BIOS |
 | `swap` | swap |
-| `pool` | thin pool (`--volume`) |
-| `lvm:GROUP` | physical volume |
-| `raid:NAME` | array member |
-| `/`, `/home`, … | filesystem |
+| `lvm:GROUP` | a physical volume of an LVM group |
+| `raid:NAME` | an array member |
+| `pool` | an LVM thin pool |
+| `reserve` | an empty partition the size of the boot ones, so RAID disks stay identical |
+
+Example: LVM on one disk, `/home` on xfs.
 
 ```text
 --partition disk=/dev/sda,size=4MiB,point=biosboot
@@ -248,7 +270,7 @@ A disk is given by path: `/dev/sda`, `/dev/nvme0n1` or `/dev/disk/by-id/…` (pr
 --volume vg=vg,name=home,size=rest,point=/home,fs=xfs
 ```
 
-RAID1 under LVM, boot from a USB stick:
+Example: a two-disk mirror under LVM, booting from a USB stick.
 
 ```toml
 firmware = "uefi"
@@ -281,273 +303,245 @@ point = "/"
 
 [[volume]]
 vg    = "vg"
-name  = "swap"
-size  = "8GiB"
-point = "swap"
-
-[[volume]]
-vg      = "vg"
-name    = "home"
-size    = "rest"
-point   = "/home"
-fs      = "xfs"
-options = "noatime"
+name  = "home"
+size  = "rest"
+point = "/home"
 ```
 
-### LVM thin volumes
+**Thin volumes.** Space for them is allocated as data is written. The pool is a volume with `point=pool`; a thin volume names it in `pool=`. A thin volume needs a number as its size, `rest` is not allowed. The pool is not encrypted and `swap` is never thin. If thin volumes add up to more than the pool, `check` warns.
 
-A pool is a volume with `point=pool`; thin volumes name it in `pool=`. A thin volume size is virtual (`rest` is not allowed).
-
-```text
---partition disk=/dev/sda,size=4MiB,point=biosboot
---partition disk=/dev/sda,size=512MiB,point=boot
---partition disk=/dev/sda,size=rest,point=lvm:vg
---volume vg=vg,name=pool,size=100GiB,point=pool
---volume vg=vg,name=root,size=50GiB,point=/,pool=pool
---volume vg=vg,name=home,size=200GiB,point=/home,pool=pool
-```
-
-- A pool is not encrypted; `swap` cannot be thin.
-- Exceeding the pool size gives a note in `check`.
-
-### Filesystem options
-
-| Key | Meaning |
-|---|---|
-| `mkfs=ARGS` | `mkfs.*` arguments separated by spaces |
-| `options=OPTS` | `fstab` field (`defaults` if omitted) |
-
-A comma inside values is written as `;`. `-U`, `-F`, `-f`, `--uuid`, `--force` are forbidden.
+**File system options.** `mkfs=` passes arguments to `mkfs.*`, `options=` sets the `fstab` mount options (`defaults` by default). A comma inside a value is written as `;`. `-U`, `-F`, `-f`, `--uuid`, `--force` are not allowed.
 
 ```text
---partition disk=/dev/sdb,size=whole,point=/data,mkfs=-T largefile4 -m 1,options=noatime
 --partition disk=/dev/sdb,size=whole,point=/data,fs=xfs,mkfs=-m crc=1;finobt=1,options=noatime;discard
 ```
 
-### Layout validation
-
-Checked before anything is erased:
-
-- one `/` and one `boot`; `biosboot` only for BIOS and hybrid
-- RAID member count, distinct disks
-- volumes in a group, at most one `rest`
-- safe and unique mount points
-- sizes against real disks (at install time only)
+**Checked before erasing:** one `/` and one `boot`; `biosboot` only with BIOS; RAID members on different disks; at most one `rest`; no repeated mount points; during the install, sizes against the real disks.
 
 ### Layout editor
-
-Page "Disk" → "Disk scheme" → "Custom layout".
 
 | Keys | Action |
 |---|---|
 | `↑` `↓` `Home` `End` `PgUp` `PgDn` | move |
-| `→` / `←` | expand / collapse |
-| `n` | add in context |
-| `r` / `v` | RAID / LVM volume |
-| `e` (`F2`) | edit |
-| `f` | filesystem |
+| `→` / `←` | expand / collapse a branch |
+| `NUM+` / `NUM-` | expand / collapse everything |
+| `n` | add in place |
+| `r` / `v` | RAID array / LVM volume |
+| `e` (`F2`) | edit as a line |
+| `f` | change the file system |
 | `o` | options: default → SSD → large files |
 | `c` / `h` | encryption / detached header |
 | `d` (`Delete`) | delete |
-| `Tab` | fill in `point=` |
-| `u` | undo (up to 32 steps) |
+| `Tab` | insert `point=` |
+| `u` | undo, up to 32 steps |
 | `Esc` (`q`) | close |
 
-### Installer utilities
+Layout errors are highlighted in red right in the tree.
 
-Missing utilities are installed by the host `dnf` before any disk is touched.
+### Tools of the installer itself
 
-| Utility | Package | When |
-|---|---|---|
-| `mkfs.fat` | `dosfstools` | always |
-| `mkfs.ext4` | `e2fsprogs` | ext4 |
-| `mkfs.xfs` | `xfsprogs` | xfs |
-| `mkfs.btrfs` | `btrfs-progs` | btrfs |
-| `thin_check` | `device-mapper-persistent-data` | thin volumes |
-| `cryptsetup` | `cryptsetup` | encryption |
-| `pvcreate` | `lvm2` | LVM |
-| `mdadm` | `mdadm` | RAID |
+If the media lacks a needed tool, the installer installs it with `dnf` before touching any disk: `mkfs.fat` (`dosfstools`), `mkfs.ext4` (`e2fsprogs`), `mkfs.xfs` (`xfsprogs`), `mkfs.btrfs` (`btrfs-progs`), `cryptsetup`, `pvcreate` (`lvm2`), `mdadm`, `thin_check` (`device-mapper-persistent-data`).
 
 ---
 
-## 🔐 Encryption
+## 🌐 Network
 
-LUKS2 on a partition, array, physical or logical volume; layers combine freely.
+The network is set up separately in two places:
 
-| Key | Meaning |
+| Where | Why | Flags / config section |
+|---|---|---|
+| initramfs | unlocking over SSH, config over the network | `--initrd-*` / `[initrd]` |
+| system | normal work | `--system-*` / `[system]` |
+
+| Mode | What to set |
 |---|---|
-| `crypt=pass` | passphrase, one for all devices |
-| `crypt=key` | random key `/etc/luks/NAME.key` (600) |
-| `header=detached` | header `/etc/luks/NAME.hdr` |
+| `none` | nothing, no network |
+| `dhcp` | nothing; `interface` is optional |
+| `manual` | `interface`, `address` (`10.0.0.5/24`), `gateway`, `dns` (several allowed) |
 
-- Simple schemes encrypt root: `--no-encryption`, `--keyfile`, `--detached-header`.
-- Only devices required for `/` and `/usr` go into initramfs; the system opens the rest from `crypttab`.
-- `/boot` and biosboot are not encrypted.
-- For an initramfs device `crypt=key` requires `header=detached`.
-- A header inside the device takes up to 16 MiB.
-- A detached header on a partition is referenced in `crypttab` by `PARTUUID=`.
-
-```text
---partition disk=/dev/sda,size=4MiB,point=biosboot
---partition disk=/dev/sda,size=512MiB,point=boot
---partition disk=/dev/sda,size=rest,point=/,crypt=key,header=detached
---partition disk=/dev/sdb,size=whole,point=/mnt/data,crypt=key,header=detached
+```toml
+[system]
+network   = "manual"
+interface = "enp3s0"
+address   = "10.0.0.5/24"
+gateway   = "10.0.0.1"
+dns       = ["9.9.9.9"]
+backend   = "networkd"
 ```
 
-### Remote unlock
-
-`--ssh-key` enables dracut-sshd; the passphrase is entered over SSH.
-
-> ⚠️ The root key and header in initramfs do not protect against losing the USB stick with `/boot`. Keep a copy of the headers elsewhere.
+`backend` is the network service: `networkd` (default) or `networkmanager`. The other service is disabled (`systemctl mask`), even if it is not installed.
 
 ---
 
-## 📄 Config
+## 🧩 Kernel and services
 
-TOML mirrors the CLI flags:
+| What | Flag | Config | Wizard |
+|---|---|---|---|
+| Kernel parameters | `--kernel-arg quiet` | `kernel_arg = ["quiet"]` | "Kernel parameters" |
+| Services | `--service sshd` | `service = ["sshd"]` | "Services to enable" |
 
-1. `a_b` → `--a-b`.
-2. An array repeats the flag.
-3. `true` sets the flag, `false` does nothing.
-4. `[initrd]`, `[system]`, `[uboot]` add a prefix.
-5. `[[users]]`, `[[partition]]`, `[[raid]]`, `[[volume]]`, `[[repository]]` are blocks.
+- Kernel options are saved in `/etc/default/grub` and `/etc/kernel/cmdline`: new kernels get them automatically.
+- Services are enabled with `systemctl enable`. If a service's package is not in the base set, add it to the packages.
+
+---
+
+## 📚 Repositories
+
+| From | Flag / key | Kept in the system |
+|---|---|---|
+| A repository of the media (`/etc/yum.repos.d`) | `--repo ID` | with `--repo-file` or "Copy repositories to the system" in the wizard |
+| A local directory with `.rpm` files and metadata | `--repo-dir PATH` | no |
+| Described in the config | `[[repository]]` / `--repository …` | yes |
+
+```toml
+[[repository]]
+id       = "evillin"                                      # required, unique
+baseurl  = "https://repo.evillin.online/$basearch/"       # or metalink, or mirrorlist
+gpgkey   = "file:///etc/pki/rpm-gpg/RPM-GPG-KEY-evillin"  # needed while gpgcheck is on
+priority = 10                                             # 1…99, lower wins
+```
+
+More keys: `name`, `exclude`, `includepkgs`, `gpgcheck = false`.
+
+- Priority of a media repository for the install only: `--repo-priority ID=N`.
+- `dnf` options: `--option key=value`, for example `tsflags=nodocs`. There are none by default.
+
+---
+
+## 🗂️ Config in detail
+
+A config is a TOML file. Its keys mirror the flags:
+
+1. `boot_disk = "…"` is the same as `--boot-disk …`.
+2. An array repeats the flag: `kernel_arg = ["quiet", "splash"]`.
+3. `true` sets a flag (`keyfile = true`), `false` does nothing.
+4. The `[initrd]`, `[system]`, `[uboot]` sections add a prefix: `[system] network = "dhcp"` is `--system-network dhcp`.
+5. The `[[users]]`, `[[partition]]`, `[[raid]]`, `[[volume]]`, `[[repository]]` blocks can be repeated.
+
+Flags given on the command line after `--config` win over the config.
 
 ```toml
 disk      = "/dev/disk/by-id/nvme-Samsung_SSD_980_PRO"
 boot_disk = "/dev/disk/by-id/usb-SanDisk_Cruzer-0:0"
 hostname  = "moonshine"
 timezone  = "Europe/Moscow"
-
-repo          = ["updates"]
-repo_priority = ["updates=20"]
-repo_dir      = ["/srv/rpms"]
-package       = ["vim-enhanced", "htop"]
-option        = ["tsflags=nodocs", "weak_deps=False", "releasever=44"]
-
-keyfile = true
-ssh_key = ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGq3Zr0C6c3C3m1x0hJ6iHqB0t9pQ0QJ5h2S3mT1mYxQ alice@evillin.online"]
+keyfile   = true
+ssh_key   = ["ssh-ed25519 AAAA… alice@evillin.online"]
+package   = ["sudo"]
 
 [[repository]]
-id       = "company"
-baseurl  = "https://rpm.evillin.online/company/$basearch/"
-priority = 5
-gpgcheck = false
+id      = "evillin"
+baseurl = "https://repo.evillin.online/$basearch/"
+gpgkey  = "file:///etc/pki/rpm-gpg/RPM-GPG-KEY-evillin"
 
 [[users]]
 name = "alice"
-hash = "$6$salt$..."
+hash = "$6$…"
 
 [initrd]
 network = "dhcp"
 
 [system]
-network   = "manual"
-address   = "10.0.0.5/24"
-gateway   = "10.0.0.1"
-dns       = ["9.9.9.9"]
-interface = "enp3s0"
-backend   = "networkd"
+network = "dhcp"
 ```
 
-```sh
-moonshine-install --config /root/moonshine.toml
-moonshine-install --config https://evillin.online/moonshine.toml
-moonshine-install --config 'git+https://git.evillin.online/infra.git#main:machines/moonshine.toml'
-```
-
-- Git: `git+URL#[branch|tag|commit:]path.toml`, relative path without `..`.
-- Arguments after the file override the config.
-- Example: [`dist/examples/moonshine.toml`](dist/examples/moonshine.toml).
+A config from git: `git+URL#[branch|tag|commit:]path.toml`, a path inside the repository, no `..`.
 
 ---
 
-## ✅ Check
+## ✅ Checking: check
 
-`check` validates the whole config, **changing and reading no disks**. Exit code `0` — valid, `1` — error.
+`check` validates the whole config and shows what will happen. **Disks are neither changed nor read.** Exit code `0` means valid, `1` means an error.
 
 ```sh
-moonshine-install check moonshine.toml
-moonshine-install check moonshine.toml --plan
+moonshine-install check moonshine.toml          # overview
+moonshine-install check moonshine.toml --plan   # overview and every command in order
 ```
 
 ```text
 The configuration is valid.
 
-Platform:       UEFI · x86_64 · Intel
+Platform:       BIOS+UEFI · x86_64
 Hostname:       moonshine
 Time zone:      Europe/Moscow
-Users:          alice
+Users:          root, alice
 Kernel options: none
 Services:       none
 
 Layout (disks and their sizes are not read during a check):
-  /dev/sda1              512MiB  boot
-  /dev/sda2                rest  /  [LUKS: key file, detached header]
+  /dev/sda1                4MiB  biosboot
+  /dev/sda2              512MiB  boot
+  /dev/sda3                rest  /  [LUKS: key file, detached header]
 
 Package sources:
-  host repository updates (priority 20)
-  config repository company (priority 5)
-  packages: built-in set + listed packages, listed 2
+  config repository evillin
+  base set: bash coreutils dnf dracut evillin-fonts-console evillin-release kbd kernel lvm2 openssh-server rpm shadow-utils systemd util-linux
+  extra packages: none
+  GRUB: grub
 Network in initramfs: none
-Network in system:    none
-
-Notes:
-  ! root is not listed: it will be locked, log in as a wheel user
-  ! the network of the installed system is not configured
+Network in system:    dhcp
 ```
 
-Notes do not change the exit code.
+When something is worth knowing in advance, a "Notes" block appears at the end. Notes do not stop the install.
 
 ---
 
-## 🔑 Secrets
+## 🔑 Passwords and keys
 
-| What | How to pass |
+| What | How to pass it |
 |---|---|
-| User password | hash: `--user alice:'$6$…'` or `hash` |
-| Disk passphrase | file (600): `--passphrase-file` / `passphrase_file`, otherwise prompt |
-| Disk key | generated (`crypt=key`) |
-| SSH keys | `--ssh-key` |
-| Config access over `https` | `~/.netrc` |
-| Git access | SSH key or git credential helper |
+| User password | an `openssl passwd -6` hash: `hash` in a config or `--user alice:'$6$…'` |
+| Disk passphrase | a file with mode 600: `--passphrase-file` / `passphrase_file`; without a file it is asked on the console |
+| Disk key | created automatically with `crypt=key` |
+| SSH key for unlocking | `--ssh-key` / `ssh_key` |
+| Access to a config over `https` | `~/.netrc` |
+| Access to git | an SSH key or a git credential manager |
 
-- Hash: `openssl passwd -6`.
-- A passphrase cannot be a hash: LUKS derives the key from the phrase itself.
-- A file readable by group or others, empty or multi-line stops the installation.
-- Do not put a password in a URL.
+- A passphrase cannot be a hash: the encryption key is derived from the phrase itself.
+- A passphrase file readable by group or others, empty or with several lines is refused.
+- Never put a password into a URL.
+
+> ⚠️ A config served over the network contains password hashes: serve it over `https`.
 
 ---
 
-## 💿 Install from media (dracut)
+## 💿 Installing from media and over the network
 
-`dist/` turns the installer into a bootable image: USB stick, PXE/iPXE, GRUB entry.
+The installer can live inside an initramfs: it starts right after boot, from a USB stick, over the network (PXE/iPXE) or from a GRUB menu entry.
+
+1. Build and install the files:
 
 ```sh
 cargo build --release --locked
-sudo make -C dist install
-sudo /usr/libexec/moonshine-install/build-initrd moonshine-installer.img
+make -C dist install
 ```
 
-`make install` honours `DESTDIR` and `PREFIX`. The module is included on request only (`dracut --add moonshine-install`).
+2. Build an initramfs image with the installer:
 
-| Kernel parameter | Meaning |
+```sh
+/usr/libexec/moonshine-install/build-initrd moonshine-installer.img
+```
+
+3. Boot a kernel with this image and these options:
+
+| Kernel option | What it does |
 |---|---|
-| `moonshine.config=WHERE` | file, `https://…`, `git+URL#[branch:]path.toml` |
-| `moonshine.wizard=1` | wizard on the console |
-| `moonshine.yes=1` | skip the `YES` question |
-| `moonshine.check=1` | check only |
-| `moonshine.after=reboot\|poweroff\|shell\|none` | action on success (`reboot`) |
+| `moonshine.config=WHERE` | install from a config: a file, `https://…` or `git+…` |
+| `moonshine.wizard=1` | the wizard on the console |
+| `moonshine.yes=1` | no `YES` question |
+| `moonshine.check=1` | only check the config |
+| `moonshine.after=reboot\|poweroff\|shell\|none` | what to do after success, `reboot` by default |
 | `moonshine.lang=en\|ru` | language |
 
-- A config over the network needs `ip=dhcp`; without `ip=` and `rd.neednet` the module adds `rd.neednet=1 ip=dhcp`.
-- Put the passphrase file into the image: `build-initrd inst.img "$(uname -r)" --include /root/luks.txt /root/luks.txt`.
-- On failure the dracut emergency console stays open.
+- A config over the network needs a network: without `ip=` the module adds `rd.neednet=1 ip=dhcp` itself.
+- A passphrase file goes into the image like this: `build-initrd inst.img "$(uname -r)" --include /root/luks.txt /root/luks.txt`.
+- On failure the dracut emergency shell stays open.
 
-**GRUB:**
+**A GRUB menu entry on a running machine.** Handy for reinstalling a remote server: after a reboot you pick the entry and the machine installs from the config. `moonshine.yes=1` is needed when nobody is at the console: the disk is erased without asking.
 
 ```sh
 /usr/libexec/moonshine-install/grub-entry /vmlinuz /moonshine-installer.img \
-    https://evillin.online/moonshine.toml moonshine.yes=1 >> /boot/grub2/custom.cfg
+    https://evillin.online/moonshine.toml moonshine.yes=1 >> /boot/grub/custom.cfg
 ```
 
 **iPXE:**
@@ -559,145 +553,94 @@ initrd http://evillin.online/moonshine-installer.img
 boot
 ```
 
-**Live system:**
+**Live system.** The service starts the installer from the same kernel options:
 
 ```sh
-sudo systemctl enable moonshine-install.service
+systemctl enable moonshine-install.service
 ```
 
-> ⚠️ A config served over the network contains password hashes: serve it over `https`. For unattended `crypt=pass` use `passphrase_file`, `crypt=key`, or no encryption.
-
-Script check: `make -C dist check`.
-
----
-
-## 🧭 Wizard controls
-
-Pages: **Encryption → Disk → Repositories → System → Initramfs network → System network → Packages → Summary**.
-
-| Keys | Action |
-|---|---|
-| `Tab` / `PageDown` | next page |
-| `Shift+Tab` / `PageUp` | previous page |
-| `↑` `↓` | page, field, list item |
-| `Enter` / `→` | enter, edit, select |
-| `←` / `Esc` | back, cancel |
-| `Space` | toggle / open list |
-| `e` / `F2` | edit as text |
-| `Backspace` / `Delete` | remove the last value |
-| `Home` / `End` | first / last field |
-| `Ctrl+C` | quit |
-
-The install screen shows the plan: ✓ done, ✗ failed, ▸ running, · pending.
+`make -C dist install` understands `DESTDIR` and `PREFIX`. Script checks: `make -C dist check`.
 
 ---
 
 ## 🌍 Language
 
-| Order | Method |
-|---|---|
-| 1 | `--lang en\|ru` |
-| 2 | `lang` in the config |
-| 3 | `MOONSHINE_LANG` |
-| 4 | `moonshine.lang=en\|ru` |
-| 5 | `LC_ALL`, `LC_MESSAGES`, `LANG`: `ru…` → Russian, otherwise English |
-
-Config keys, flags and plan commands are not translated. In initramfs the default is English.
+Russian is picked automatically when the system language is Russian (`LANG=ru_RU.UTF-8`), English otherwise. Explicitly: `--lang ru`, `lang = "ru"` in a config, the `MOONSHINE_LANG=ru` variable or the `moonshine.lang=ru` kernel option.
 
 ---
 
-## 📚 Flags
+## 📋 All flags
 
 ```text
-moonshine-install                                wizard
-moonshine-install FLAGS                          install
+moonshine-install                              wizard
+moonshine-install FLAGS                        install
 moonshine-install check TARGET [--plan] [FLAGS]  check
 
---disk PATH                   root disk
---boot-disk PATH              boot disk (default: same)
---boot-size MIB               /boot size (min 256), default 512
---partition …  --raid …  --volume …   custom layout
---firmware hybrid|uefi|bios|uboot
---arch x86_64|aarch64
---cpu intel|amd|other
---uboot-image FILE            raw U-Boot image
---uboot-offset SECTORS        image offset, below 32768
+Disks
+  --disk PATH                   system disk
+  --boot-disk PATH              boot disk (same disk by default)
+  --boot-size MIB               /boot size, from 256 (512 by default)
+  --partition …  --raid …  --volume …   custom layout
+  --firmware hybrid|uefi|bios|uboot
+  --arch x86_64|aarch64
+  --uboot-image FILE            U-Boot image for the board
+  --uboot-offset SECTORS        image offset, below 32768
 
---repo ID                     host repository (repeatable)
---repo-priority ID=N          priority 1…99, during installation
---repository id=…,baseurl|metalink|mirrorlist=…[,name=…][,priority=…][,gpgcheck=0|1][,gpgkey=…]
---repo-dir DIR                local directory with rpms (repeatable)
---repo-file FILE              copy a host .repo into the system (repeatable)
---package NAME                package (repeatable)
---bare                        no built-in package set
---option KEY=VALUE            dnf option (repeatable)
+Encryption
+  --no-encryption               do not encrypt the root
+  --keyfile                     open the root with a key file
+  --detached-header             detached root header
+  --ssh-key "KEY"               unlocking over SSH (repeatable)
+  --passphrase-file PATH        passphrase file (mode 600)
 
---hostname NAME  --timezone ZONE (default UTC)
---kernel-arg OPTION           kernel option of the system (repeatable)
---service UNIT                systemd service (repeatable)
---user NAME[:HASH]            user (repeatable)
+Packages
+  --repo ID                     media repository (repeatable)
+  --repo-priority ID=N          its priority 1…99 for the install
+  --repo-file FILE              copy a media .repo into the system (repeatable)
+  --repo-dir DIR                local package directory (repeatable)
+  --repository id=…,baseurl=…   repository from a description (repeatable)
+  --base NAME                   base set instead of the built-in one (repeatable)
+  --package NAME                extra package (repeatable)
+  --bare                        no base set and no conditional packages
+  --grub NAME                   GRUB name (grub by default)
+  --option KEY=VALUE            dnf option (repeatable)
 
---no-encryption               no root encryption (with --disk)
---detached-header             detached LUKS header for root (with --disk)
---keyfile                     root key file (with --disk)
---ssh-key "KEY"               key for unlock over SSH (repeatable)
+System
+  --hostname NAME
+  --timezone ZONE               UTC by default
+  --user NAME[:HASH]            user (repeatable)
+  --kernel-arg OPTION           kernel option (repeatable)
+  --service UNIT                enable a service (repeatable)
 
---initrd-network none|dhcp|manual
---system-network none|dhcp|manual
-  and --initrd-/--system- interface, address, gateway, dns
---system-backend networkd|networkmanager
+Network
+  --initrd-network none|dhcp|manual    network in initramfs
+  --system-network none|dhcp|manual    network in system
+  --initrd-/--system- interface, address, gateway, dns
+  --system-backend networkd|networkmanager
 
---config WHERE                file, https:// or git+URL#[branch:]path
---passphrase-file PATH        passphrase file (600)
---lang en|ru                  language
---yes                         no confirmation
+Other
+  --config WHERE                file, https:// or git+URL#[branch:]path
+  --lang en|ru                  language
+  --yes                         no YES confirmation
 ```
 
 ---
 
-## 🛡️ Input validation
+## ❓ FAQ
 
-Rules are the same for flags, wizard, TOML, URL and git; validation runs before the first action on a disk.
+**How do I see what will be done without erasing anything?** `moonshine-install check moonshine.toml --plan`.
 
-| What | Rule |
-|---|---|
-| Disks | `/dev/…`, safe characters, no `..` |
-| Paths | absolute, no `..`, spaces or shell metacharacters |
-| dnf options | `key=value`, up to 255 characters |
-| Packages, ids | short alphabet, no leading `-` |
-| Passwords | no control characters; hashes of valid format only |
-| SSH keys | one line, known type, no options |
-| URL | `http(s)`; git: `https`, `http`, `ssh`, `git`; `ext::` and `file://` forbidden |
+**After the install I cannot become root.** A `wheel` user gets root rights only through `sudo`. Log in as `root` (if you gave it a password) and install `sudo`, or reinstall with `sudo` added to the packages.
 
-User data never reaches a shell: commands run with separate arguments.
+**A password is asked at boot.** It is the encryption passphrase set on the "Encryption" step. To avoid typing it, choose a key file: the key will be on the boot disk.
+
+**The "Packages" step shows an error.** Usually a listed package is missing from the repository or a dependency is missing. The error text is the `dnf` output. Remove the package from the "Packages" field or add the needed repository.
+
+**Which disk to choose?** The wizard shows each disk's type (SSD/HDD), size and model. With flags a path from `ls -l /dev/disk/by-id/` is safer.
 
 ---
 
-## 🏗️ Design
-
-```text
-Config ──► plan::build ──► Vec<Step> ──► exec::execute
- (CLI, TUI,   pure           Run / Write /   in order,
-  TOML)       function       Release         secrets via stdin
-```
-
-Order: release disks → partitioning → RAID → LVM → formatting and LUKS → mounting → `dnf` → configuration → `dracut` → bootloader → unmount and close layers.
-
-| Module | Purpose |
-|---|---|
-| `main`, `cli`, `check` | entry, modes, report |
-| `plan`, `storage`, `layout` | steps, storage, layout model |
-| `config`, `options`, `manifest`, `secrets` | configuration, flags, TOML/URL/git |
-| `repository`, `repos`, `sources`, `resolve` | repositories, package resolution |
-| `hardware`, `disks`, `network` | hardware, disks, network |
-| `draft`, `app`, `ui`, `tui`, `editor`, `input` | wizard and editor |
-| `exec`, `error`, `i18n` | execution, errors, language |
-
----
-
-## 🧪 Build and tests
-
-Rust edition 2024.
+## 🧪 For developers
 
 ```sh
 cargo build --release
@@ -705,26 +648,31 @@ cargo fmt && cargo clippy --all-targets && cargo test
 make -C dist check
 ```
 
-Tests live in `tests` modules and need no root. The host needs `dnf`, `sfdisk`, `wipefs`, `mount`, `dracut`; `git` and `curl` for configs from git and URLs.
+- Rust edition 2024. Tests live in `tests` modules and do not need root.
+- The host needs `dnf`, `sfdisk`, `wipefs`, `mount`, `dracut`; `curl` and `git` for configs over the network.
+- The `sources_use_only_glyphs_of_the_console_font` test keeps the interface to the characters of the evillin console font.
+
+Design: a config from the wizard, flags or TOML becomes a plan, a list of steps. The plan runs in order: releasing disks → partitioning → RAID → LVM → LUKS and formatting → mounting → `dnf` → configuration → `dracut` → bootloader → unmounting. Passwords reach commands through stdin; user data never reaches a shell.
+
+| Module | Purpose |
+|---|---|
+| `main`, `cli`, `check` | entry, modes, report |
+| `plan`, `storage`, `layout` | steps, storage, layout model |
+| `config`, `options`, `manifest`, `secrets` | settings, flags, TOML/URL/git |
+| `repository`, `repos`, `sources`, `resolve` | repositories, package resolution |
+| `hardware`, `disks`, `network` | hardware, disks, network |
+| `draft`, `app`, `ui`, `tui`, `editor`, `input` | wizard and editor |
+| `exec`, `error`, `i18n` | execution, errors, language |
 
 ---
 
 ## 🚧 Limitations
 
-- Architectures: `x86_64`, `aarch64` (in testing); filesystems: ext4, xfs, btrfs without subvolumes.
-- A config from a URL or git is not signature-checked.
-- An LVM group that also spans another disk stays partly active there.
-
-Not verified on real systems (plans and tests only):
-
-- LUKS: several devices in initramfs, detached header, LUKS on RAID and LVM, closing layers on finish
-- RAID, LVM, thin volumes, the `reserve` partition, the `usrmount` module
-- bootloader: `*-modules` package names, hybrid, `grubenv` and `grub.cfg` on FAT
-- `dnf` 4 and 5: `reposdir` with a directory list, `$releasever` of host repositories
-- kernel options with Fedora BLS entries, `systemctl enable` and `mask` in the installed system
-- btrfs, U-Boot, installing the installer's utilities
-- the dracut module and systemd unit on a real image
-- English texts have not been reviewed by a native speaker
+- Architectures: `x86_64`; `aarch64` is in testing.
+- File systems: ext4, xfs, btrfs (no subvolumes).
+- Configs over a URL or from git are not checked by signature.
+- An LVM group that also spans another disk stays partially active there.
+- Not yet tried on real hardware: several encrypted devices in the initramfs, LUKS on RAID and LVM, thin volumes, btrfs, U-Boot, the dracut module and the systemd service on a finished image.
 
 ---
 

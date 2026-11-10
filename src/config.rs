@@ -106,8 +106,68 @@ pub struct Source {
     pub repositories: Vec<Repository>,
     /// Приоритеты репозиториев хоста из `repos`; действуют только во время установки.
     pub priorities: Vec<(String, u32)>,
-    /// Без встроенного набора пакетов (`@core`, ядро, dracut, загрузчик): всё задаётся в `packages`.
+    /// Без встроенного набора пакетов (основной набор, загрузчик): всё задаётся в `packages`.
     pub bare: bool,
+    pub distro: Distro,
+}
+
+/// Основной набор пакетов по умолчанию: минимальная система evillin.
+pub const BASE_PACKAGES: [&str; 14] = [
+    "bash",
+    "coreutils",
+    "dnf",
+    "dracut",
+    "evillin-fonts-console",
+    "evillin-release",
+    "kbd",
+    "kernel",
+    "lvm2",
+    "openssh-server",
+    "rpm",
+    "shadow-utils",
+    "systemd",
+    "util-linux",
+];
+
+/// Имена, которые различаются между дистрибутивами; по умолчанию — как в evillin.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Distro {
+    /// Ставится всегда, кроме `--bare`.
+    pub base: Vec<String>,
+    /// Пакеты `ИМЯ-tools` и `ИМЯ-ЦЕЛЬ-modules`, команды `ИМЯ-install` и `ИМЯ-mkconfig`, каталог `/boot/ИМЯ`.
+    pub grub: String,
+}
+
+impl Default for Distro {
+    fn default() -> Self {
+        Self {
+            base: BASE_PACKAGES.map(String::from).to_vec(),
+            grub: "grub".into(),
+        }
+    }
+}
+
+impl Distro {
+    pub fn validate(&self) -> Result<(), Error> {
+        self.base.iter().try_for_each(|spec| check_package(spec))?;
+        check_grub(&self.grub)
+    }
+}
+
+/// Имя GRUB входит в имена пакетов, команд и каталог `/boot`.
+pub fn check_grub(name: &str) -> Result<(), Error> {
+    if !name.is_empty()
+        && name.len() <= 64
+        && !name.starts_with(['-', '.'])
+        && name_chars(name, &['-', '_', '.'])
+    {
+        Ok(())
+    } else {
+        Err(Error::Invalid(tr!(
+            "invalid GRUB name: {name}",
+            "неверное имя GRUB: {name}"
+        )))
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -115,15 +175,6 @@ pub enum Arch {
     #[default]
     X86_64,
     Aarch64,
-}
-
-/// Производитель процессора: от него зависит микрокод.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum Cpu {
-    Intel,
-    Amd,
-    #[default]
-    Other,
 }
 
 #[derive(Debug, Clone)]
@@ -160,7 +211,6 @@ pub struct Config {
     pub firmware: Firmware,
     pub source: Source,
     pub arch: Arch,
-    pub cpu: Cpu,
     pub hostname: String,
     /// Пользователи, кроме `root`, получают группу `wheel`; если `root` не указан, он блокируется.
     pub users: Vec<User>,
@@ -477,6 +527,7 @@ impl Source {
         }
 
         self.validate_repositories()?;
+        self.distro.validate()?;
 
         self.repos.iter().try_for_each(|id| check_repo_id(id))?;
         self.local
@@ -569,6 +620,16 @@ impl Config {
         }
 
         Ok(())
+    }
+
+    /// Root заблокирован, а sudo среди пакетов нет: права root получить будет нечем.
+    pub fn lacks_admin(&self) -> bool {
+        let source = &self.source;
+        let sudo = |name: &String| name == "sudo";
+
+        !self.users.iter().any(|user| user.name == ROOT)
+            && !source.packages.iter().any(sudo)
+            && (source.bare || !source.distro.base.iter().any(sudo))
     }
 
     /// У каждого зашифрованного устройства есть чем его открыть.
@@ -778,6 +839,37 @@ fn lookup(list: &[(String, Uuid)], key: &str) -> Uuid {
 mod tests {
     use super::*;
     use crate::testing::config;
+
+    #[test]
+    fn without_root_and_sudo_nobody_gets_root_rights() {
+        let mut config = config();
+
+        assert!(config.lacks_admin());
+
+        config.source.packages.push("sudo".into());
+        assert!(!config.lacks_admin());
+
+        config.source.packages.clear();
+        config.users[0].name = ROOT.into();
+        assert!(!config.lacks_admin());
+    }
+
+    #[test]
+    fn distro_names_are_checked() {
+        assert!(config().validate().is_ok());
+
+        for grub in ["", "-grub", ".grub", "gr/ub", "grub;x"] {
+            let mut config = config();
+
+            config.source.distro.grub = grub.into();
+            assert!(config.validate().is_err(), "{grub}");
+        }
+
+        let mut config = config();
+
+        config.source.distro.base.push("a;b".into());
+        assert!(config.validate().is_err());
+    }
 
     #[test]
     fn kernel_parameters_must_be_safe_for_the_shell_file() {

@@ -727,7 +727,7 @@ repo = ["evillin"]
 name = "alice"
 
 [[repository]]
-id       = "rocky"
+id       = "evil"
 baseurl  = "https://m/$releasever"
 priority = 10
 gpgcheck = false
@@ -738,12 +738,33 @@ gpgcheck = false
         assert!(args.contains(&"evillin=5".to_string()));
         assert!(args.windows(2).any(|pair| {
             pair[0] == "--repository"
-                && pair[1] == "baseurl=https://m/$releasever,gpgcheck=0,id=rocky,priority=10"
+                && pair[1] == "baseurl=https://m/$releasever,gpgcheck=0,id=evil,priority=10"
         }));
         assert!(
-            Repository::parse("baseurl=https://m/$releasever,gpgcheck=0,id=rocky,priority=10")
+            Repository::parse("baseurl=https://m/$releasever,gpgcheck=0,id=evil,priority=10")
                 .is_ok()
         );
+    }
+
+    #[test]
+    fn distro_names_come_from_the_file() {
+        let text = r#"
+disk = "/dev/sda"
+hostname = "moon"
+repo = ["evillin"]
+base = ["kernel", "dracut"]
+grub = "mygrub"
+
+[[users]]
+name = "root"
+"#;
+        let distro = crate::options::Options::parse(arguments(text).unwrap())
+            .unwrap()
+            .source
+            .distro;
+
+        assert_eq!(distro.base, ["kernel", "dracut"]);
+        assert_eq!(distro.grub, "mygrub");
     }
 
     #[test]

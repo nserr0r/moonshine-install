@@ -2,7 +2,6 @@ use std::fmt;
 
 use crate::config::Arch;
 use crate::config::Config;
-use crate::config::Cpu;
 use crate::config::Firmware;
 use crate::config::Ids;
 use crate::config::ROOT;
@@ -27,7 +26,6 @@ const EXTLINUX_SCRIPT: &str = "version=$(ls /lib/modules | sort -V | tail -n 1)\
 const HOST_REPOS: &str = "/etc/yum.repos.d";
 const LOCAL_REPO: &str = "moonshine-local";
 const BOOTLOADER_ID: &str = "moonshine";
-const GRUB_CONFIG: &str = "/boot/grub2/grub.cfg";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Input {
@@ -299,46 +297,50 @@ pub fn dnf_args(config: &Config, root: &str, assume: &str) -> Vec<String> {
     args
 }
 
-/// Пакеты, без которых остальные шаги установки не выполнятся (имена семейства Fedora).
+/// Пакеты, без которых остальные шаги установки не выполнятся; имена берутся из `source.distro`.
 pub fn base_packages(config: &Config) -> Vec<String> {
     if config.source.bare {
         return Vec::new();
     }
 
-    let mut names = vec!["@core", "kernel", "dracut"];
+    let distro = &config.source.distro;
+    let mut names = distro.base.clone();
 
     if config.firmware == Firmware::Uboot {
-        names.push("uboot-tools");
+        names.push("uboot-tools".into());
     } else {
-        names.push("grub2-tools");
-        names.extend(grub_targets(config).iter().map(|target| target.package));
+        names.push(format!("{}-tools", distro.grub));
+        names.extend(
+            grub_targets(config)
+                .iter()
+                .map(|target| format!("{}-{}-modules", distro.grub, target.modules)),
+        );
     }
 
-    if config.arch == Arch::X86_64 && config.cpu == Cpu::Intel {
-        names.push("microcode_ctl");
-    }
-
-    if config.users.iter().any(|user| user.name != ROOT) {
-        names.push("sudo");
-    }
-
-    names.extend(storage::packages(config));
+    let mut extra = storage::packages(config);
 
     if config.initrd_network.cmdline(&config.hostname).is_some() {
-        names.push("dracut-network");
+        extra.push("dracut-network");
     }
 
     if !config.ssh_keys.is_empty() {
-        names.extend(["dracut-sshd", "openssh-server"]);
+        extra.extend(["dracut-sshd", "openssh-server"]);
     }
 
-    if config.system_network.setup(config.backend).is_some()
-        && config.backend == Backend::NetworkManager
-    {
-        names.push("NetworkManager");
+    if let Some(setup) = config.system_network.setup(config.backend) {
+        match config.backend {
+            Backend::NetworkManager => extra.push("NetworkManager"),
+            Backend::Networkd => extra.extend(&setup.services),
+        }
     }
 
-    names.into_iter().map(String::from).collect()
+    for name in extra {
+        if !names.iter().any(|known| known == name) {
+            names.push(name.into());
+        }
+    }
+
+    names
 }
 
 pub(crate) fn uboot(config: &Config) -> bool {
@@ -485,7 +487,7 @@ fn accounts(config: &Config) -> Vec<Step> {
     }
 
     if config.users.iter().all(|user| user.name != ROOT) {
-        steps.push(Step::Run(Command::in_target("passwd", ["--lock", ROOT])));
+        steps.push(Step::Run(Command::in_target("usermod", ["--lock", ROOT])));
     }
 
     steps
@@ -545,32 +547,33 @@ fn services(config: &Config) -> Vec<Step> {
     steps
 }
 
+/// Цель `grub-install` и часть имени пакета её модулей: `ИМЯ-{modules}-modules`.
 struct GrubTarget {
     name: &'static str,
-    package: &'static str,
+    modules: &'static str,
 }
 
-const fn grub_target(name: &'static str, package: &'static str) -> GrubTarget {
-    GrubTarget { name, package }
+const fn grub_target(name: &'static str, modules: &'static str) -> GrubTarget {
+    GrubTarget { name, modules }
 }
 
 fn grub_targets(config: &Config) -> Vec<GrubTarget> {
     let mut targets = Vec::new();
 
     if config.firmware.has_bios() {
-        targets.push(grub_target("i386-pc", "grub2-pc-modules"));
+        targets.push(grub_target("i386-pc", "pc"));
     }
 
     if config.firmware.has_efi() {
         match config.arch {
             Arch::X86_64 => {
                 if config.firmware == Firmware::Hybrid {
-                    targets.push(grub_target("i386-efi", "grub2-efi-ia32-modules"));
+                    targets.push(grub_target("i386-efi", "efi-ia32"));
                 }
 
-                targets.push(grub_target("x86_64-efi", "grub2-efi-x64-modules"));
+                targets.push(grub_target("x86_64-efi", "efi-x64"));
             }
-            Arch::Aarch64 => targets.push(grub_target("arm64-efi", "grub2-efi-aa64-modules")),
+            Arch::Aarch64 => targets.push(grub_target("arm64-efi", "efi-aa64")),
         }
     }
 
@@ -582,6 +585,7 @@ fn bootloader(config: &Config, ids: &Ids) -> Vec<Step> {
         return uboot_loader(config, ids);
     }
 
+    let grub = &config.source.distro.grub;
     let mut steps: Vec<Step> = grub_targets(config)
         .iter()
         .map(|target| {
@@ -599,13 +603,13 @@ fn bootloader(config: &Config, ids: &Ids) -> Vec<Step> {
 
             args.push(config.layout.boot_disk().into());
 
-            Step::Run(Command::in_target("grub2-install", args))
+            Step::Run(Command::in_target(&format!("{grub}-install"), args))
         })
         .collect();
 
     steps.push(Step::Run(Command::in_target(
-        "grub2-mkconfig",
-        ["-o", GRUB_CONFIG],
+        &format!("{grub}-mkconfig"),
+        ["-o", &format!("/boot/{grub}/grub.cfg")],
     )));
     steps
 }
@@ -704,10 +708,8 @@ mod tests {
         let mut config = packages(&[]);
 
         config.source.repositories = vec![
-            Repository::parse(
-                "id=rocky,baseurl=https://m/$releasever,priority=10,gpgkey=file:///k",
-            )
-            .unwrap(),
+            Repository::parse("id=evil,baseurl=https://m/$releasever,priority=10,gpgkey=file:///k")
+                .unwrap(),
             Repository::parse("id=extra,mirrorlist=https://m/list,gpgcheck=0").unwrap(),
         ];
         config.source.priorities = vec![("moon".into(), 5)];
@@ -723,15 +725,15 @@ mod tests {
 
         assert!(lines.contains(&format!("mkdir -p {STAGE_DIR}")));
         assert!(lines.iter().any(|line| {
-            line.starts_with("sh -c cat > \"$1\" sh /run/moonshine/repos.d/rocky.repo")
+            line.starts_with("sh -c cat > \"$1\" sh /run/moonshine/repos.d/evil.repo")
         }));
         assert!(position(&lines, "mkdir -p /run/moonshine") < position(&lines, "dnf "));
         assert!(dnf.contains("--setopt=reposdir=/etc/yum.repos.d,/run/moonshine/repos.d"));
-        assert!(dnf.contains("--enablerepo=rocky") && dnf.contains("--enablerepo=extra"));
+        assert!(dnf.contains("--enablerepo=evil") && dnf.contains("--enablerepo=extra"));
         assert!(dnf.contains("--setopt=moon.priority=5"));
         assert!(position(&lines, "dnf ") < position(&lines, "rm -rf /run/moonshine/repos.d"));
 
-        let kept = written(&steps, "/etc/yum.repos.d/rocky.repo").unwrap();
+        let kept = written(&steps, "/etc/yum.repos.d/evil.repo").unwrap();
 
         assert!(kept.contents.contains("priority=10\n") && kept.mode == 0o644);
         assert!(written(&steps, "/etc/yum.repos.d/extra.repo").is_some());
@@ -810,7 +812,7 @@ mod tests {
             "dnf --installroot={TARGET} --releasever=44 --setopt=tsflags=nodocs --assumeyes --disablerepo=*"
         )));
         assert!(dnf.contains(
-            "--enablerepo=baseos --enablerepo=moon --setopt=reposdir=/etc/yum.repos.d install @core kernel"
+            "--enablerepo=baseos --enablerepo=moon --setopt=reposdir=/etc/yum.repos.d install bash coreutils"
         ));
         assert!(dnf.ends_with("vim-enhanced @sound"));
     }
@@ -1024,12 +1026,16 @@ mod tests {
         let has =
             |config: &Config, name: &str| base_packages(config).iter().any(|item| item == name);
 
-        assert!(has(&config, "@core") && has(&config, "kernel") && has(&config, "dracut"));
         assert!(
-            has(&config, "grub2-tools")
-                && has(&config, "grub2-efi-x64-modules")
-                && !has(&config, "grub2-pc-modules")
-                && !has(&config, "grub2-efi-ia32-modules")
+            crate::config::BASE_PACKAGES
+                .iter()
+                .all(|name| has(&config, name))
+        );
+        assert!(
+            has(&config, "grub-tools")
+                && has(&config, "grub-efi-x64-modules")
+                && !has(&config, "grub-pc-modules")
+                && !has(&config, "grub-efi-ia32-modules")
         );
         assert!(
             has(&config, "cryptsetup")
@@ -1040,16 +1046,16 @@ mod tests {
         config.firmware = Firmware::Bios;
         config.layout = Layout::simple("/dev/sda", "/dev/sda", Firmware::Bios);
         assert!(
-            has(&config, "grub2-pc-modules")
-                && !has(&config, "grub2-efi-x64-modules")
+            has(&config, "grub-pc-modules")
+                && !has(&config, "grub-efi-x64-modules")
                 && !has(&config, "cryptsetup")
         );
 
         config.firmware = Firmware::Hybrid;
         assert!(
-            has(&config, "grub2-pc-modules")
-                && has(&config, "grub2-efi-ia32-modules")
-                && has(&config, "grub2-efi-x64-modules")
+            has(&config, "grub-pc-modules")
+                && has(&config, "grub-efi-ia32-modules")
+                && has(&config, "grub-efi-x64-modules")
         );
 
         config.passphrase = Some(Secret::new("x"));
@@ -1142,7 +1148,7 @@ mod tests {
             )));
         }
 
-        assert!(lines.contains(&format!("chroot {TARGET} passwd --lock root")));
+        assert!(lines.contains(&format!("chroot {TARGET} usermod --lock root")));
         assert_eq!(
             lines
                 .iter()
@@ -1150,7 +1156,6 @@ mod tests {
                 .count(),
             2
         );
-        assert!(base_packages(&config).contains(&"sudo".to_string()));
     }
 
     #[test]
@@ -1167,7 +1172,6 @@ mod tests {
                 .any(|line| line.contains("useradd") || line.contains("--lock"))
         );
         assert!(lines.contains(&format!("chroot {TARGET} chpasswd --encrypted < <секрет>")));
-        assert!(!base_packages(&config).contains(&"sudo".to_string()));
     }
 
     #[test]
@@ -1234,8 +1238,8 @@ mod tests {
         let packages = base_packages(&config);
         let lines = commands(&build(&config, &ids()));
 
-        assert!(packages.contains(&"grub2-efi-aa64-modules".to_string()));
-        assert!(!packages.contains(&"grub2-efi-x64-modules".to_string()));
+        assert!(packages.contains(&"grub-efi-aa64-modules".to_string()));
+        assert!(!packages.contains(&"grub-efi-x64-modules".to_string()));
         assert!(lines.iter().any(|line| line.contains("--target=arm64-efi")));
     }
 
@@ -1268,23 +1272,11 @@ mod tests {
         );
     }
 
-    #[test]
-    fn intel_microcode_is_installed_only_on_intel_x86() {
-        let has = |config: &Config| base_packages(config).contains(&"microcode_ctl".to_string());
+    fn with_distro(distro: crate::config::Distro) -> Config {
+        let mut config = config();
 
-        assert!(has(&Config {
-            cpu: Cpu::Intel,
-            ..config()
-        }));
-        assert!(!has(&Config {
-            cpu: Cpu::Amd,
-            ..config()
-        }));
-        assert!(!has(&Config {
-            cpu: Cpu::Intel,
-            arch: Arch::Aarch64,
-            ..config()
-        }));
+        config.source.distro = distro;
+        config
     }
 
     #[test]
@@ -1301,7 +1293,7 @@ mod tests {
         assert!(!lines.iter().any(|line| line.contains("/boot/efi")));
         assert!(lines.iter().any(|line| {
             line.ends_with(
-                "grub2-install --no-nvram --force --removable --target=x86_64-efi --boot-directory=/boot --efi-directory=/boot /dev/sda",
+                "grub-install --no-nvram --force --removable --target=x86_64-efi --boot-directory=/boot --efi-directory=/boot /dev/sda",
             )
         }));
     }
@@ -1319,7 +1311,7 @@ mod tests {
         assert!(lines.contains(&"mkfs.fat -F 32 -i ABCD1234 /dev/sda2".to_string()));
         assert!(!lines.iter().any(|line| line.contains("/boot/efi")));
         assert!(lines.contains(&format!(
-            "chroot {TARGET} grub2-install --no-nvram --force --removable --target=i386-pc --boot-directory=/boot /dev/sda"
+            "chroot {TARGET} grub-install --no-nvram --force --removable --target=i386-pc --boot-directory=/boot /dev/sda"
         )));
     }
 
@@ -1327,10 +1319,10 @@ mod tests {
     fn hybrid_installs_bios_and_both_efi_loaders_and_then_one_config() {
         let hybrid = with_firmware(Firmware::Hybrid);
         let lines = commands(&build(&hybrid, &ids_for(&hybrid.layout)));
-        let first = position(&lines, "grub2-install");
+        let first = position(&lines, "grub-install");
         let install = |target: &str, efi: &str| {
             format!(
-                "chroot {TARGET} grub2-install --no-nvram --force --removable --target={target} --boot-directory=/boot{efi} /dev/sda"
+                "chroot {TARGET} grub-install --no-nvram --force --removable --target={target} --boot-directory=/boot{efi} /dev/sda"
             )
         };
 
@@ -1345,7 +1337,7 @@ mod tests {
         );
         assert_eq!(
             lines[first + 3],
-            format!("chroot {TARGET} grub2-mkconfig -o /boot/grub2/grub.cfg")
+            format!("chroot {TARGET} grub-mkconfig -o /boot/grub/grub.cfg")
         );
         assert!(
             lines
@@ -1728,7 +1720,7 @@ mod tests {
             &"dd if=/srv/u-boot.bin of=/dev/sda seek=64 bs=512 conv=notrunc".to_string()
         ));
         assert!(lines.iter().any(|line| line.contains("extlinux.conf")));
-        assert!(!lines.iter().any(|line| line.contains("grub2")));
+        assert!(!lines.iter().any(|line| line.contains("grub")));
     }
 
     #[test]
@@ -2001,6 +1993,76 @@ mod tests {
     }
 
     #[test]
+    fn the_grub_name_sets_packages_commands_and_the_config_path() {
+        let config = Config {
+            firmware: Firmware::Hybrid,
+            ..with_distro(crate::config::Distro {
+                grub: "mygrub".into(),
+                ..Default::default()
+            })
+        };
+        let packages = base_packages(&config);
+        let lines = commands(&build(&config, &ids_for(&config.layout)));
+
+        for name in [
+            "mygrub-tools",
+            "mygrub-pc-modules",
+            "mygrub-efi-ia32-modules",
+            "mygrub-efi-x64-modules",
+        ] {
+            assert!(packages.contains(&name.to_string()), "{name}");
+        }
+
+        assert!(lines.iter().any(|line| line.contains(" mygrub-install ")));
+        assert!(lines.contains(&format!(
+            "chroot {TARGET} mygrub-mkconfig -o /boot/mygrub/grub.cfg"
+        )));
+        assert!(!packages.iter().any(|name| name.starts_with("grub-")));
+    }
+
+    #[test]
+    fn the_base_set_comes_from_the_distro_names() {
+        let config = with_distro(crate::config::Distro {
+            base: vec!["@core".into(), "kernel".into()],
+            ..Default::default()
+        });
+        let packages = base_packages(&config);
+
+        assert_eq!(packages[..3], ["@core", "kernel", "grub-tools"]);
+        assert!(
+            !packages
+                .iter()
+                .any(|name| name == "sudo" || name == "dracut")
+        );
+    }
+
+    #[test]
+    fn conditional_packages_follow_the_choices_and_never_repeat() {
+        let mut config = config();
+
+        config.system_network = Network::Dhcp { interface: None };
+        config.backend = Backend::Networkd;
+
+        let packages = base_packages(&config);
+        let has = |name: &str| packages.iter().any(|known| known == name);
+
+        assert!(has("systemd-networkd") && has("dosfstools"));
+        assert!(!has("NetworkManager"));
+        assert_eq!(config.layout.has_crypt(), has("cryptsetup"));
+
+        for name in &packages {
+            assert_eq!(
+                packages.iter().filter(|known| *known == name).count(),
+                1,
+                "{name}"
+            );
+        }
+
+        config.backend = Backend::NetworkManager;
+        assert!(base_packages(&config).contains(&"NetworkManager".to_string()));
+    }
+
+    #[test]
     fn steps_follow_a_safe_order() {
         let lines = commands(&build(&config(), &ids()));
         let order = [
@@ -2012,8 +2074,8 @@ mod tests {
             "dnf ",
             "chpasswd",
             "dracut --force",
-            "grub2-install",
-            "grub2-mkconfig",
+            "grub-install",
+            "grub-mkconfig",
             "umount --recursive",
             "cryptsetup close",
         ];

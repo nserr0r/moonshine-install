@@ -1,6 +1,6 @@
 [package]
 name = "moonshine-install"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Установщик для Moonshine"
 license = "Apache-2.0"
@@ -10,7 +10,7 @@ name = "moonshine-install"
 path = "src/main.rs"
 
 [dependencies]
-rpassword = { version = "*" }
-uuid = { version = "*", features = ["fast-rng", "serde", "v4"] }
 ratatui = { version = "0.30" }
+rpassword = { version = "*" }
 toml = "1.1.8"
+uuid = { version = "*", features = ["fast-rng", "serde", "v4"] }

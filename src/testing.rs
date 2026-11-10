@@ -1,6 +1,5 @@
 use crate::config::Arch;
 use crate::config::Config;
-use crate::config::Cpu;
 use crate::config::Firmware;
 use crate::config::Ids;
 use crate::config::Secret;
@@ -27,7 +26,6 @@ pub fn config() -> Config {
             ..Source::default()
         },
         arch: Arch::X86_64,
-        cpu: Cpu::Other,
         hostname: "moon".into(),
         users: vec![User {
             name: "alice".into(),

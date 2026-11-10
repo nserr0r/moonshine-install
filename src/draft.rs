@@ -3,6 +3,7 @@ use std::path::Path;
 
 use crate::config;
 use crate::config::Config;
+use crate::config::Distro;
 use crate::config::Firmware;
 use crate::config::Secret;
 use crate::config::Source;
@@ -37,6 +38,7 @@ pub enum Id {
     LocalRepos,
     Options,
     Packages,
+    Grub,
     CopyRepos,
     Hostname,
     User,
@@ -125,6 +127,7 @@ impl Page {
                 Id::LocalRepos,
                 Id::Options,
                 Id::Packages,
+                Id::Grub,
                 Id::CopyRepos,
             ],
             Page::System => &[
@@ -567,6 +570,8 @@ impl Draft {
     }
 
     fn repo_fields(repos: &[Repo]) -> Vec<Field> {
+        let distro = Distro::default();
+
         vec![
             Field::multi(
                 Id::Repos,
@@ -598,12 +603,21 @@ impl Draft {
             ),
             Field::text(
                 Id::Packages,
-                tt!("Extra packages", "Дополнительные пакеты"),
+                tt!("Packages", "Пакеты"),
                 tt!(
-                    "Separated by spaces or commas: a name, @group or a pattern. The main ones are installed automatically",
-                    "Через пробел или запятую: имя, @группа или шаблон. Основные ставятся сами"
+                    "Separated by spaces or commas; the bootloader and the layout tools are added automatically",
+                    "Через пробел или запятую; загрузчик и утилиты разметки добавятся сами"
                 ),
-                "",
+                &distro.base.join(" "),
+            ),
+            Field::text(
+                Id::Grub,
+                tt!("GRUB name", "Имя GRUB"),
+                tt!(
+                    "The start of the GRUB package and command names: NAME-tools, NAME-install",
+                    "Начало имён пакетов и команд GRUB: ИМЯ-tools, ИМЯ-install"
+                ),
+                &distro.grub,
             ),
             Field::options(
                 Id::CopyRepos,
@@ -635,8 +649,8 @@ impl Draft {
                 Id::User,
                 tt!("User", "Пользователь"),
                 tt!(
-                    "Lowercase Latin letters, digits, \"_\" and \"-\"",
-                    "Строчные латинские буквы, цифры, «_» и «-»"
+                    "Lowercase Latin letters, digits, \"_\" and \"-\"; other users get root rights only through sudo",
+                    "Строчные латинские буквы, цифры, «_» и «-»; права root другим даёт только sudo"
                 ),
                 "",
             ),
@@ -1050,6 +1064,7 @@ impl Draft {
             }
             Id::SshKeys => self.encrypted(),
             Id::UbootImage | Id::UbootOffset => self.field(Id::Firmware).index == 2,
+            Id::Grub => self.field(Id::Firmware).index != 2,
             Id::InitrdInterface => self.mode(Id::InitrdMode) != 0,
             Id::InitrdAddress | Id::InitrdGateway | Id::InitrdDns => self.mode(Id::InitrdMode) == 2,
             Id::Backend | Id::SystemInterface => self.mode(Id::SystemMode) != 0,
@@ -1153,6 +1168,7 @@ impl Draft {
                 .iter()
                 .find_map(|option| config::check_option(option).err())
                 .map(|error| error.to_string()),
+            Id::Grub => failed(config::check_grub(text.trim())),
             Id::Timezone => failed(config::check_timezone(field.choice_text())),
             Id::Services => words(text)
                 .iter()
@@ -1225,7 +1241,6 @@ impl Draft {
             source: self.source(),
             hostname: self.field(Id::Hostname).value().into(),
             arch: self.hardware.arch,
-            cpu: self.hardware.cpu,
             users: vec![User {
                 name: self.field(Id::User).value().into(),
                 password: Secret::new(self.field(Id::Password).value()),
@@ -1286,9 +1301,12 @@ impl Draft {
         Source {
             repos,
             local: self.field(Id::LocalRepos).items.clone(),
-            packages: words(self.field(Id::Packages).value()),
             options: words(self.field(Id::Options).value()),
             copy,
+            distro: Distro {
+                base: words(self.field(Id::Packages).value()),
+                grub: self.field(Id::Grub).value().trim().into(),
+            },
             ..Source::default()
         }
     }
@@ -1447,6 +1465,33 @@ pub mod tests {
         }
 
         draft
+    }
+
+    #[test]
+    fn packages_start_from_the_base_set_and_reach_the_config() {
+        let mut draft = filled();
+
+        assert_eq!(draft.to_config().unwrap().source.distro, Distro::default());
+
+        draft.field_mut(Id::Packages).input = Input::with("@core, kernel  vim");
+        draft.field_mut(Id::Grub).input = Input::with(" mygrub ");
+
+        let source = draft.to_config().unwrap().source;
+
+        assert_eq!(source.distro.base, ["@core", "kernel", "vim"]);
+        assert_eq!(source.distro.grub, "mygrub");
+        assert!(source.packages.is_empty());
+    }
+
+    #[test]
+    fn the_grub_name_is_checked_and_hidden_for_uboot() {
+        let mut draft = filled();
+
+        draft.field_mut(Id::Grub).input = Input::with("gr/ub");
+        assert!(draft.error(Id::Grub).is_some());
+
+        draft.field_mut(Id::Firmware).index = 2;
+        assert!(!draft.visible(Id::Grub) && draft.error(Id::Grub).is_none());
     }
 
     #[test]
@@ -1812,14 +1857,14 @@ pub mod tests {
 
         let Source {
             repos,
-            packages,
+            distro,
             options,
             copy,
             ..
         } = draft.to_config().unwrap().source;
 
         assert_eq!(repos, ["baseos", "moon"]);
-        assert_eq!(packages, ["vim-enhanced", "@sound", "mc"]);
+        assert_eq!(distro.base, ["vim-enhanced", "@sound", "mc"]);
         assert_eq!(
             options,
             ["tsflags=nodocs", "weak_deps=False", "releasever=44"]
